@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  flighttrak:
+    build: .
+    ports:
+      - "3005:3000"
+    env_file:
+      - .env
+    restart: unless-stopped
+    volumes:
+      - ./cost_tracking.json:/usr/src/app/cost_tracking.json
+      - ./:/usr/src/app
+      - /usr/src/app/node_modules

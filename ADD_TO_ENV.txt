@@ -1,0 +1,190 @@
+=================================================================
+ADD THESE LINES TO YOUR .env FILE (UPDATED FOR HYBRID API SUPPORT)
+=================================================================
+
+Open your .env file and add these new variables:
+
+# Flightradar24 API (NEW!)
+FLIGHTRADAR24_API_KEY=your_fr24_api_key_here
+FLIGHTRADAR24_LOOKUP_ALTITUDE_FEET=2000
+
+=================================================================
+FULL .env FILE EXAMPLE (WITH HYBRID API SUPPORT)
+=================================================================
+
+Here's what your complete .env file should look like:
+
+# Location
+ZIPCODE=10314
+LATITUDE=40.6895
+LONGITUDE=-74.1745
+
+# Flight Tracking
+SEARCH_RADIUS_MILES=5
+POLL_INTERVAL=30000
+
+# FlightAware API (Optional)
+FLIGHTAWARE_API_KEY=your_actual_api_key_here
+FLIGHTAWARE_LOOKUP_ALTITUDE_FEET=2000
+
+# Flightradar24 API (Optional - NEW!)
+FLIGHTRADAR24_API_KEY=your_fr24_api_key_here
+FLIGHTRADAR24_LOOKUP_ALTITUDE_FEET=2000
+
+# OpenSky Network (Free - Always Used)
+OPENSKY_CLIENT_ID=your_client_id
+OPENSKY_CLIENT_SECRET=your_client_secret
+
+=================================================================
+API PROVIDER COMPARISON
+=================================================================
+
+OPENSKY NETWORK (FREE - ALWAYS ENABLED)
+- Cost: FREE
+- Rate Limit: 400 req/min (with OAuth), 10 req/min (anonymous)
+- Data: Live flight positions, basic route estimation
+- Usage: Primary data source for all flight positions
+
+FLIGHTAWARE
+- Cost: Pay-as-you-go (~$3-15/month typical usage)
+- Rate Limit: 5 calls/minute
+- Data: Detailed flight info, origin/destination, aircraft type
+- Usage: Enhanced data for specific flights
+- Best For: High-quality data, US flights
+
+FLIGHTRADAR24 (RECOMMENDED)
+- Cost: $9/month for 30K credits (Explorer plan)
+- Rate Limit: 10 calls/minute
+- Data: Comprehensive flight info, origin/destination, aircraft type, airline
+- Usage: Enhanced data for specific flights
+- Best For: Predictable monthly cost, global coverage, higher rate limits
+
+=================================================================
+SINGLE ENHANCED API STRATEGY
+=================================================================
+
+The system uses ONE enhanced API at a time (not both):
+
+1. OpenSky Network: ALWAYS used for live flight positions (free)
+2. FlightAware OR Flightradar24: Choose ONE for enhanced data
+
+HOW IT WORKS:
+- OpenSky tracks ALL flights in your area (free, no limits on display)
+- When a new flight is detected, the system queries your ACTIVE
+  enhanced API (FR24 or FA) for detailed route and aircraft info
+- You can switch between APIs via radio buttons in the UI
+- Only ONE enhanced API is active at any time
+
+RECOMMENDED CONFIGURATIONS:
+
+Budget Setup ($0/month):
+  - OpenSky only (no enhanced APIs)
+  - Full flight tracking, limited route info
+
+Balanced Setup ($9/month):
+  - OpenSky + Flightradar24
+  - Best value, predictable cost, global coverage
+  - Set: ENHANCED_API_PROVIDER=flightradar24
+
+US-Focused Setup ($3-15/month):
+  - OpenSky + FlightAware
+  - Pay-per-use, excellent US coverage
+  - Set: ENHANCED_API_PROVIDER=flightaware
+
+Dual Setup (Both APIs configured):
+  - Have both API keys in .env
+  - Switch between them via UI radio buttons
+  - Only ONE active at a time
+
+=================================================================
+QUICK SETUP INSTRUCTIONS
+=================================================================
+
+1. Get API Keys:
+   
+   FlightAware (Optional):
+   - Visit: https://flightaware.com/commercial/aeroapi/
+   - Sign up for AeroAPI
+   - Copy your API key
+   
+   Flightradar24 (Recommended):
+   - Visit: https://fr24api.flightradar24.com/
+   - Subscribe to Explorer plan ($9/month, 30K credits)
+   - Copy your API key
+   
+   OpenSky (Required):
+   - Visit: https://opensky-network.org/
+   - Create account and OAuth credentials
+   - Copy client ID and secret
+
+2. Update .env file:
+   nano .env
+   # Add the API keys from above
+
+3. Restart FlightTrak:
+   docker-compose restart
+
+4. Check startup logs:
+   docker-compose logs | grep "FlightTrak Configuration" -A 10
+
+You should see:
+   --- API Providers ---
+   OpenSky Network: ✓ ALWAYS ENABLED (free)
+   FlightAware: ✓ ENABLED (if key provided)
+   Flightradar24: ✓ ENABLED (if key provided)
+
+=================================================================
+USING THE UI API SELECTOR
+=================================================================
+
+In the top-right of the dashboard, you'll see "ENHANCED API:" with radio buttons.
+
+- Choose ONE enhanced API: FR24 or FA
+- Only the selected API will be used for flight lookups
+- OpenSky is always used for live positions (not selectable)
+- Switching updates immediately (no restart needed)
+- Altitude filter adjusts based on selected provider
+
+EXAMPLES:
+- Select "FR24": Use Flightradar24 for all enhanced lookups
+- Select "FA": Use FlightAware for all enhanced lookups
+- Footer shows stats for ONLY the active provider
+
+=================================================================
+MONITORING COSTS
+=================================================================
+
+The footer shows real-time API usage:
+
+Total Cost: Combined estimated monthly cost
+OS: OpenSky call count (always free)
+FA: FlightAware calls and cost (if enabled)
+FR24: Flightradar24 calls and credit usage (if enabled)
+
+CREDIT TRACKING (FR24):
+- Shows: "123/30000" = 123 credits used out of 30,000
+- Credits reset monthly on your billing date
+- Monitor to ensure you stay within your plan
+
+=================================================================
+TROUBLESHOOTING
+=================================================================
+
+Q: I don't see enhanced data (routes/aircraft types)?
+A: 1. Check that at least one enhanced API key is in .env
+   2. Verify the API is selected in the UI dropdown
+   3. Check altitude filter - flights below threshold won't be enhanced
+   4. Check logs: docker-compose logs -f
+
+Q: FR24 credits running out too fast?
+A: 1. Increase FLIGHTRADAR24_LOOKUP_ALTITUDE_FEET (e.g., 3000)
+   2. Reduce SEARCH_RADIUS_MILES
+   3. Increase POLL_INTERVAL
+   4. Use FlightAware for some flights (select both in UI)
+
+Q: Which API should I choose?
+A: - Start with FR24 ($9/month, predictable, good global coverage)
+   - Add FlightAware if you need US-specific detailed data
+   - Use both for maximum reliability and data quality
+
+=================================================================

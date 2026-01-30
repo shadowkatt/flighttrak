@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FLIGHTTRAK | Local Air Traffic</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <header>
+        <div class="logo">
+            <div class="logo-icon"></div>
+            FLIGHTTRAK
+        </div>
+        <div class="status-bar">
+            <div class="status-item">COORDINATES: <span id="location-zip">...</span></div>
+            <div class="status-item">RANGE: <span id="location-range">3 MILES</span></div>
+            <div class="status-item">ALTITUDE: <span id="altitude-filter">-- FT</span></div>
+            <div class="status-item">TRAFFIC: <span id="traffic-count">--</span></div>
+            <div class="status-item">TIME: <span id="local-time">--:--:--</span></div>
+            <div class="status-item api-selector">
+                <span style="margin-right: 10px;">ENHANCED API:</span>
+                <label class="radio-label">
+                    <input type="radio" name="api-provider" value="flightradar24" checked>
+                    <span>FR24</span>
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="api-provider" value="flightaware">
+                    <span>FA</span>
+                </label>
+            </div>
+        </div>
+    </header>
+
+
+    <!-- Banner Grid - Persistent Flight Cards -->
+    <div id="banner-grid" class="banner-grid">
+        <!-- Banner cards will be injected here -->
+    </div>
+
+    <main>
+        <div id="flight-container" class="flight-grid">
+            <!-- Flights will be injected here -->
+        </div>
+
+        <div id="empty-state" class="empty-state" style="display: none;">
+            <div class="radar-sweep"></div>
+            <h2>NO TRAFFIC DETECTED</h2>
+            <p>Scanning local airspace...</p>
+        </div>
+
+        <!-- History Log -->
+        <div class="history-container">
+            <h3>RECENT TRAFFIC</h3>
+            <table class="flight-log-table">
+                <thead>
+                    <tr>
+                        <th>TIME</th>
+                        <th>AIRLINE</th>
+                        <th>CALLSIGN</th>
+                        <th>TYPE</th>
+                        <th>ORIGIN (APT)</th>
+                        <th>DEST (APT)</th>
+                        <th>ALTITUDE</th>
+                        <th>SPEED</th>
+                        <th>VR</th>
+                    </tr>
+                </thead>
+                <tbody id="history-log-body">
+                    <!-- History rows -->
+                </tbody>
+            </table>
+        </div>
+    </main>
+
+
+    <!-- Aviation Facts Ticker -->
+    <div class="facts-ticker">
+        <div class="facts-content" id="facts-content"></div>
+    </div>
+
+    <footer>
+        <div class="footer-content">
+            <div class="api-calls">
+                <span title="OpenSky Network">OS: <span id="os-calls">0</span> calls</span>
+                <span title="FlightAware" id="fa-stats" style="display:none">FA: <span id="fa-calls">0</span> calls ($<span id="fa-cost">0.00</span>)</span>
+                <span title="Flightradar24" id="fr24-stats" style="display:none">FR24: <span id="fr24-calls">0</span> calls (<span id="fr24-credits">0</span> credits)</span>
+            </div>
+            <div class="reset-date">Resets: <span id="reset-date">--</span></div>
+        </div>
+    </footer>
+
+    <div class="loading">SCANNING...</div>
+
+    <!-- Aircraft Type Submission Modal -->
+    <div id="aircraft-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Unknown Aircraft Type</h2>
+                <span class="modal-close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Help improve FlightTrak by identifying this aircraft type:</p>
+                <div class="form-group">
+                    <label>Aircraft Code:</label>
+                    <input type="text" id="aircraft-code" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Aircraft Name:</label>
+                    <input type="text" id="aircraft-name" placeholder="e.g., Boeing 737-800">
+                </div>
+                <div class="form-group">
+                    <label>Category (Optional):</label>
+                    <select id="aircraft-category">
+                        <option value="">Select category...</option>
+                        <option value="commercial">Commercial Airliner</option>
+                        <option value="regional">Regional Jet</option>
+                        <option value="business">Business Jet</option>
+                        <option value="cargo">Cargo Aircraft</option>
+                        <option value="turboprop">Turboprop</option>
+                        <option value="military">Military</option>
+                        <option value="helicopter">Helicopter</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button id="submit-aircraft" class="btn-primary">Submit</button>
+                    <button id="cancel-aircraft" class="btn-secondary">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="data.js"></script>
+    <script src="airport_data_generated.js"></script>
+    <script src="aircraft_types.js"></script>
+    <script src="aviation_facts.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>
