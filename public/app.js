@@ -13,6 +13,7 @@ let bannerFlightIds = new Set(); // Track which flights have been added to banne
 const MAX_BANNER_CARDS = 5; // Maximum banner cards to show (reduced for larger display)
 let flightHistory = []; // Store list of recent unique flights
 const MAX_HISTORY = 10;
+let historyFlightIds = new Set(); // Track which flights have been added to history
 let ALTITUDE_THRESHOLD_FEET = 5000; // Default, will be loaded from config
 let availableProviders = {}; // Track which API providers are available
 let activeProvider = 'flightradar24'; // Current active enhanced provider (only ONE at a time)
@@ -66,26 +67,34 @@ function processFlights(flights) {
             }
 
             // Enrich with Route Data (Async)
-            fetchRouteData(flight).then(route => {
-                // Update local flight object with route info
-                flight.routeOrigin = route.origin;
-                flight.routeDestination = route.destination;
-                if (route.aircraft_type) {
-                    flight.aircraft_type = route.aircraft_type;
-                }
+            // Skip API call if test data already has route info
+            if (flight.routeOrigin && flight.routeDestination && flight.aircraft_type) {
+                console.log(`[Test Data] Using pre-populated route data for ${flight.callsign || flight.icao24}`);
 
-                // Check if N-designated (general aviation)
-                const isGeneralAviation = flight.callsign && flight.callsign.startsWith('N');
-                
-                // Show popup and banner only for commercial flights
-                if (!isGeneralAviation) {
+                // Show popup and banner for all flights (server-side filtering handles private flights)
+                showFlightPopup(flight);
+                addToBanner(flight);
+
+                // Always add to history
+                addToHistory(flight);
+            } else {
+                // Fetch route data from API for real flights
+                fetchRouteData(flight).then(route => {
+                    // Update local flight object with route info
+                    flight.routeOrigin = route.origin;
+                    flight.routeDestination = route.destination;
+                    if (route.aircraft_type) {
+                        flight.aircraft_type = route.aircraft_type;
+                    }
+
+                    // Show popup and banner for all flights (server-side filtering handles private flights)
                     showFlightPopup(flight);
                     addToBanner(flight);
-                }
-                
-                // Always add to history (including N-designated)
-                addToHistory(flight);
-            });
+
+                    // Always add to history
+                    addToHistory(flight);
+                });
+            }
         } else {
             // Preserve route info if we already have it
             const oldFlight = activeFlights.get(flight.icao24);
@@ -124,6 +133,9 @@ function processFlights(flights) {
     // ... (rest of function)
 }
 
+// Track in-flight requests to prevent duplicates
+const pendingRouteRequests = new Map();
+
 async function fetchRouteData(flight) {
     try {
         const params = new URLSearchParams();
@@ -136,10 +148,28 @@ async function fetchRouteData(flight) {
         
         const queryString = params.toString();
         const url = `/api/route/${flight.icao24}${queryString ? '?' + queryString : ''}`;
-        const response = await fetch(url);
-        if (!response.ok) return { origin: null, destination: null, aircraft_type: null };
-        return await response.json();
+        
+        // Check if request is already in flight
+        if (pendingRouteRequests.has(flight.icao24)) {
+            console.log(`[Dedup] Request already pending for ${flight.callsign || flight.icao24}, waiting...`);
+            return await pendingRouteRequests.get(flight.icao24);
+        }
+        
+        // Create and store the promise
+        const requestPromise = fetch(url)
+            .then(response => {
+                if (!response.ok) return { origin: null, destination: null, aircraft_type: null };
+                return response.json();
+            })
+            .finally(() => {
+                // Clean up after request completes
+                pendingRouteRequests.delete(flight.icao24);
+            });
+        
+        pendingRouteRequests.set(flight.icao24, requestPromise);
+        return await requestPromise;
     } catch (e) {
+        pendingRouteRequests.delete(flight.icao24);
         return { origin: null, destination: null, aircraft_type: null };
     }
 }
@@ -268,12 +298,6 @@ function showFlightPopup(flight) {
 function addToBanner(flight) {
     // Skip flights without callsign
     if (!flight.callsign) return;
-    
-    // Skip N-designated planes (general aviation)
-    if (flight.callsign.startsWith('N')) {
-        console.log(`[Banner] Skipping N-designated aircraft: ${flight.callsign}`);
-        return;
-    }
 
     // Skip if already in banner
     if (bannerFlightIds.has(flight.icao24)) return;
@@ -294,6 +318,19 @@ function addToBanner(flight) {
 function renderBannerGrid() {
     if (bannerFlights.length === 0) {
         bannerGrid.innerHTML = '';
+        return;
+    }
+
+    // Smart update: Only update if the flight list has actually changed
+    const currentFlightIds = Array.from(bannerGrid.children).map(card => card.dataset.icao24);
+    const newFlightIds = bannerFlights.map(f => f.icao24);
+    
+    // Check if the flights are the same (same order, same IDs)
+    const hasChanged = currentFlightIds.length !== newFlightIds.length || 
+                       currentFlightIds.some((id, i) => id !== newFlightIds[i]);
+    
+    if (!hasChanged) {
+        // No changes - skip re-render to prevent jumpiness
         return;
     }
 
@@ -339,7 +376,7 @@ function renderBannerGrid() {
         const isUnknown = rawType && rawType === aircraftInfo && rawType.length <= 6;
 
         return `
-            <div class="banner-card">
+            <div class="banner-card" data-icao24="${flight.icao24}">
                 <div class="airline-logo-container">
                     ${logoUrl ? `<img src="${logoUrl}" class="airline-logo-banner" onerror="this.style.display='none'">` : ''}
                 </div>
@@ -363,6 +400,9 @@ function renderBannerGrid() {
 }
 
 function addToHistory(flight) {
+    // Skip if already in history
+    if (historyFlightIds.has(flight.icao24)) return;
+
     const altFt = Math.round(flight.altitude * 3.28084);
     const speedMph = Math.round(flight.velocity * 2.237);
     const vrFpm = Math.round((flight.vertical_rate || 0) * 196.85);
@@ -395,12 +435,17 @@ function addToHistory(flight) {
         type: flight.aircraft_type || aircraftCategories[flight.category] || 'N/A'
     };
 
+    // Track this flight as added to history
+    historyFlightIds.add(flight.icao24);
+
     // Add to front
     flightHistory.unshift(logEntry);
 
     // Trim
     if (flightHistory.length > MAX_HISTORY) {
-        flightHistory.pop();
+        const removed = flightHistory.pop();
+        // Also remove from tracking set so it can be re-added if it comes back
+        historyFlightIds.delete(removed.icao24);
     }
 
     renderHistory();
@@ -437,7 +482,10 @@ async function updateAPICost() {
     try {
         const response = await fetch('/api/cost');
         const data = await response.json();
-        document.getElementById('api-cost').textContent = data.total;
+        const costElement = document.getElementById('api-cost');
+        if (costElement) {
+            costElement.textContent = data.total;
+        }
     } catch (error) {
         console.error('Failed to fetch API cost:', error);
     }
@@ -491,17 +539,30 @@ async function fetchConfig() {
     try {
         const res = await fetch('/api/config');
         const config = await res.json();
-        
+
         // Store available providers and active provider
         availableProviders = config.availableProviders || {};
-        activeProvider = config.activeEnhancedProvider || 'flightradar24';
-        
+
+        // Check if provider changed server-side (e.g., hybrid mode auto-switch)
+        const newProvider = config.activeEnhancedProvider || 'flightradar24';
+        if (newProvider !== activeProvider) {
+            console.log(`[Config] Server-side provider change detected: ${activeProvider} -> ${newProvider}`);
+            activeProvider = newProvider;
+            // Update radio buttons to reflect server state
+            const radioButtons = document.querySelectorAll('input[name="api-provider"]');
+            radioButtons.forEach(radio => {
+                radio.checked = (radio.value === activeProvider);
+            });
+            // Update altitude display for the new provider
+            updateAltitudeDisplay(config);
+        }
+
         // Store hybrid mode status
         const hybridMode = config.hybridMode || false;
-        
+
         // Update altitude threshold based on active provider
         updateAltitudeDisplay(config);
-        
+
         // Update location display
         if (config.zip) {
             document.getElementById('location-zip').textContent = config.zip;
@@ -766,3 +827,6 @@ if (urlParams.get('test') === 'true') {
 fetchConfig();
 fetchCost();
 setInterval(fetchCost, 30000);
+
+// Poll config every 30 seconds to detect server-side provider changes (e.g., hybrid mode auto-switch)
+setInterval(fetchConfig, 30000);

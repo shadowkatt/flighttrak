@@ -42,7 +42,7 @@ const apiCosts = {
 };
 
 // API Logging Utility
-function logAPI(service, method, url, status, duration) {
+function logAPI(service, method, url, status, duration, clientIP = null) {
     // Sanitize URL to remove tokens/secrets
     let sanitizedUrl = url;
     if (url.includes('access_token')) {
@@ -52,8 +52,17 @@ function logAPI(service, method, url, status, duration) {
         sanitizedUrl = sanitizedUrl.replace(/client_secret=[^&]+/, 'client_secret=***');
     }
 
-    const logMsg = `[API:${service}] ${method} ${sanitizedUrl} -> ${status} (${duration}ms)`;
+    const ipInfo = clientIP ? ` [IP: ${clientIP}]` : '';
+    const logMsg = `[API:${service}] ${method} ${sanitizedUrl} -> ${status} (${duration}ms)${ipInfo}`;
     console.log(logMsg);
+}
+
+// Helper to extract client IP from request
+function getClientIP(req) {
+    return req.headers['x-forwarded-for']?.split(',')[0].trim() || 
+           req.headers['x-real-ip'] || 
+           req.socket.remoteAddress || 
+           req.ip;
 }
 
 // FlightAware API Client
@@ -72,10 +81,53 @@ const FLIGHTRADAR24_ENABLED = !!process.env.FLIGHTRADAR24_API_KEY;
 const FLIGHTRADAR24_LOOKUP_ALTITUDE_FEET = parseInt(process.env.FLIGHTRADAR24_LOOKUP_ALTITUDE_FEET) || 2000;
 
 // Hybrid Mode - Auto-switch from FlightAware to Flightradar24 at $5 threshold
-const HYBRID_MODE = process.env.HYBRID_MODE && 
-    (process.env.HYBRID_MODE.toLowerCase() === 'yes' || 
+const HYBRID_MODE = process.env.HYBRID_MODE &&
+    (process.env.HYBRID_MODE.toLowerCase() === 'yes' ||
      process.env.HYBRID_MODE.toLowerCase() === 'true');
 const HYBRID_SWITCH_THRESHOLD = 5.00; // Switch to FR24 when FA cost reaches $5
+
+// Private Flights Filter - When set to 'no', only lookup commercial airline flights
+const PRIVATE_FLIGHTS = process.env.PRIVATE_FLIGHTS ?
+    process.env.PRIVATE_FLIGHTS.toLowerCase() : 'yes';
+const FILTER_PRIVATE_FLIGHTS = PRIVATE_FLIGHTS === 'no';
+
+// Commercial Airlines ICAO Codes (for filtering private flights)
+// Based on FAA-authorized airline call signs from 123atc.com
+// Includes passenger airlines and cargo/shipping companies
+const COMMERCIAL_AIRLINES = new Set([
+    // US Major Airlines
+    'UAL', 'AAL', 'DAL', 'SWA', 'JBU', 'ASA', 'NKS', 'FFT',
+    // Regional/Commuter
+    'RPA', 'JIA', 'EDV', 'SKW', 'ENY', 'CPZ', 'GJS', 'PDT',
+    // Cargo/Shipping
+    'GTI', 'UPS', 'FDX', 'ABX', 'ATN', 'GEC',
+    // Canadian
+    'ACA', 'ROU', 'WJA', 'LOR', 'TSC', 'SWG', 'POE',
+    // European Major
+    'BAW', 'VIR', 'AFR', 'DLH', 'KLM', 'SAS', 'EIN', 'IBE', 'CPA', 'TAP',
+    'AUA', 'SWR', 'LOT', 'ICE', 'THY', 'SIA',
+    // European Low-Cost
+    'EZY', 'RYR', 'WZZ', 'VLG', 'EJU', 'TRA', 'TVS', 'DLH', 'NAX', 'BER',
+    'VOE', 'TVF', 'EXS', 'JAF', 'BEE', 'NOZ',
+    // Middle East
+    'QTR', 'UAE', 'ETD', 'ELY', 'MSR', 'ETH',
+    // Asian
+    'JAL', 'ANA', 'KAL', 'AAR', 'CXA', 'HDA',
+    // Australian
+    'QFA', 'VOZ', 'JST',
+    // Mexican
+    'AMX', 'AIJ', 'VIV', 'VOI',
+    // Additional US Airlines
+    'HAL', 'SCX', 'QXE', 'ASH', 'AWI', 'UCA', 'DJT', 'VJA',
+    // Other International
+    'AIC', 'APZ', 'AAY', 'DWI', 'BMA', 'MXY', 'FBU'
+]);
+
+function isCommercialFlight(callsign) {
+    if (!callsign || callsign.length < 3) return false;
+    const prefix = callsign.substring(0, 3).toUpperCase();
+    return COMMERCIAL_AIRLINES.has(prefix);
+}
 
 // Enhanced API Provider Selection (only ONE active at a time)
 let ACTIVE_ENHANCED_PROVIDER = process.env.ENHANCED_API_PROVIDER || 'flightradar24';
@@ -299,9 +351,21 @@ const FR24_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
 
 // List of major airline ICAO codes to prioritize for FlightAware lookups
 const MAJOR_AIRLINES = new Set([
+    // US Airlines
     'UAL', 'DAL', 'AAL', 'SWA', 'JBU', 'ASA', 'SKW', 'FFT', 'NKS', 'RPA',
-    'ENY', 'CPZ', 'GJS', 'JIA', 'FDX', 'UPS', 'GTI', 'ABX', 'ATN', 'ACA', 'ROU', 'VJA',
-    'WJA', 'LOR', 'TSC'
+    'ENY', 'CPZ', 'GJS', 'JIA', 'VJA',
+    // Cargo
+    'FDX', 'UPS', 'GTI', 'ABX', 'ATN',
+    // Canadian
+    'ACA', 'ROU', 'WJA', 'LOR', 'TSC',
+    // European Major
+    'BAW', 'AFR', 'DLH', 'KLM', 'AUA', 'SWR', 'LOT', 'ICE', 'THY', 'SIA',
+    // European Low-Cost
+    'EZY', 'RYR', 'WZZ', 'VLG', 'EJU', 'TRA',
+    // Middle East
+    'MSR', 'ETH',
+    // Other International
+    'AIC', 'APZ', 'AAY', 'DWI', 'BMA', 'MXY', 'FBU'
 ]);
 
 // Calculate distance between two points (Haversine formula)
@@ -318,53 +382,65 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 
 function shouldLookupFlightAware(callsign, flight) {
     if (!callsign || callsign.length < 3) return false;
-    
+
     // Skip general aviation (N-numbers) and private flights
     if (callsign.startsWith('N')) return false;
-    
+
+    // If filtering private flights, only lookup commercial airlines
+    if (FILTER_PRIVATE_FLIGHTS && !isCommercialFlight(callsign)) {
+        console.log(`[FlightAware] Skipping ${callsign} - not a commercial airline (PRIVATE_FLIGHTS=NO)`);
+        return false;
+    }
+
     // Check altitude - only lookup flights above threshold
     if (flight && flight.altitude !== undefined && flight.altitude !== null && !isNaN(flight.altitude)) {
         const altitudeMeters = flight.altitude;
         const altitudeFeet = altitudeMeters * 3.28084;
-        
+
         if (altitudeFeet < FLIGHTAWARE_LOOKUP_ALTITUDE_FEET) {
             console.log(`[FlightAware] Skipping ${callsign} - ${Math.round(altitudeFeet)} ft (below ${FLIGHTAWARE_LOOKUP_ALTITUDE_FEET} ft threshold)`);
             return false;
         }
-        
+
         console.log(`[FlightAware] ${callsign} at ${Math.round(altitudeFeet)} ft - will lookup`);
     } else {
         // If no altitude data, skip to be safe (probably on ground or bad data)
         console.log(`[FlightAware] Skipping ${callsign} - no valid altitude data`);
         return false;
     }
-    
+
     return true;
 }
 
 function shouldLookupFlightradar24(callsign, flight) {
     if (!callsign || callsign.length < 3) return false;
-    
+
     // Skip general aviation (N-numbers) and private flights
     if (callsign.startsWith('N')) return false;
-    
+
+    // If filtering private flights, only lookup commercial airlines
+    if (FILTER_PRIVATE_FLIGHTS && !isCommercialFlight(callsign)) {
+        console.log(`[Flightradar24] Skipping ${callsign} - not a commercial airline (PRIVATE_FLIGHTS=NO)`);
+        return false;
+    }
+
     // Check altitude - only lookup flights above threshold
     if (flight && flight.altitude !== undefined && flight.altitude !== null && !isNaN(flight.altitude)) {
         const altitudeMeters = flight.altitude;
         const altitudeFeet = altitudeMeters * 3.28084;
-        
+
         if (altitudeFeet < FLIGHTRADAR24_LOOKUP_ALTITUDE_FEET) {
             console.log(`[Flightradar24] Skipping ${callsign} - ${Math.round(altitudeFeet)} ft (below ${FLIGHTRADAR24_LOOKUP_ALTITUDE_FEET} ft threshold)`);
             return false;
         }
-        
+
         console.log(`[Flightradar24] ${callsign} at ${Math.round(altitudeFeet)} ft - will lookup`);
     } else {
         // If no altitude data, skip to be safe (probably on ground or bad data)
         console.log(`[Flightradar24] Skipping ${callsign} - no valid altitude data`);
         return false;
     }
-    
+
     return true;
 }
 
@@ -667,7 +743,7 @@ app.get('/api/flights', async (req, res) => {
         // State index: 0: icao24, 1: callsign, 2: origin_country, 5: longitude, 6: latitude, 7: baro_altitude, 9: velocity, 10: true_track
         const rawFlights = response.data.states || [];
 
-        const flights = rawFlights
+        let flights = rawFlights
             .filter(f => {
                 // Filter out flights on the ground or with invalid altitude (<= 0)
                 const onGround = f[8];
@@ -690,6 +766,20 @@ app.get('/api/flights', async (req, res) => {
                 category: f[17] // Aircraft Category
             }));
 
+        // Filter out private flights if PRIVATE_FLIGHTS=no
+        if (FILTER_PRIVATE_FLIGHTS) {
+            flights = flights.filter(f => {
+                const callsign = f.callsign;
+                if (!callsign || callsign.length < 3) return false;
+                // Only show commercial airline flights (N-numbers and private callsigns are filtered out)
+                const isCommercial = isCommercialFlight(callsign);
+                if (!isCommercial) {
+                    console.log(`[Filter] Excluding private flight ${callsign} from flight list`);
+                }
+                return isCommercial;
+            });
+        }
+
         flightCache = {
             data: flights,
             lastUpdated: now
@@ -711,6 +801,10 @@ app.get('/api/flights', async (req, res) => {
 app.get('/api/route/:icao24', async (req, res) => {
     const { icao24 } = req.params;
     const { callsign, lat, lon, altitude } = req.query;
+    const clientIP = getClientIP(req);
+
+    // Log the route request with client IP
+    console.log(`[Route Request] ${callsign || icao24} from ${clientIP}`);
 
     let routeData = null;
     
@@ -822,6 +916,8 @@ app.get('/api/config', (req, res) => {
         activeEnhancedProvider: ACTIVE_ENHANCED_PROVIDER,
         hybridMode: HYBRID_MODE,
         hybridSwitchThreshold: HYBRID_SWITCH_THRESHOLD,
+        privateFlights: PRIVATE_FLIGHTS,
+        filterPrivateFlights: FILTER_PRIVATE_FLIGHTS,
         availableProviders: {
             flightaware: FLIGHTAWARE_ENABLED,
             flightradar24: FLIGHTRADAR24_ENABLED,
@@ -961,6 +1057,7 @@ async function startServer() {
     }
     
     console.log(`\nActive Enhanced Provider: ${ACTIVE_ENHANCED_PROVIDER.toUpperCase()}`);
+    console.log(`Private Flights Filter: ${FILTER_PRIVATE_FLIGHTS ? 'COMMERCIAL ONLY' : 'ALL FLIGHTS'}`);
     console.log('================================\n');
 
     // Geocode Zip if provided

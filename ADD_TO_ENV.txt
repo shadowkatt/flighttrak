@@ -15,9 +15,8 @@ FULL .env FILE EXAMPLE (WITH HYBRID API SUPPORT)
 Here's what your complete .env file should look like:
 
 # Location
-ZIPCODE=10314
-LATITUDE=40.6895
-LONGITUDE=-74.1745
+LATITUDE=
+LONGITUDE=
 
 # Flight Tracking
 SEARCH_RADIUS_MILES=5

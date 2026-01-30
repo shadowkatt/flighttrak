@@ -664,7 +664,7 @@ main {
   background: #0a0a0a;
   border-top: 1px solid #333;
   padding: 20px;
-  padding-bottom: 60px; /* Add space for facts ticker */
+  padding-bottom: 50px; /* Add space for facts ticker (reduced from 60px) */
   border-radius: 8px;
   margin-top: 10px; /* Small margin from banner */
   max-height: none;
@@ -846,12 +846,12 @@ main {
 /* Facts Ticker */
 .facts-ticker {
   position: fixed;
-  bottom: 40px;
+  bottom: 32px;
   left: 0;
   width: 100%;
   background: rgba(10, 10, 10, 0.95);
   border-top: 1px solid #222;
-  padding: 8px 20px;
+  padding: 6px 20px;
   z-index: 45;
   overflow: hidden;
 }
@@ -1127,7 +1127,7 @@ footer {
   /* Compact table */
   .history-container {
     padding: 15px;
-    padding-bottom: 50px;
+    padding-bottom: 45px;
   }
 
   .flight-log-table {
@@ -1150,7 +1150,7 @@ footer {
 
   /* Adjust facts ticker */
   .facts-ticker {
-    bottom: 35px;
-    padding: 6px 15px;
+    bottom: 28px;
+    padding: 4px 15px;
   }
 }
