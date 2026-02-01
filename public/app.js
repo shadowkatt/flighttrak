@@ -2,6 +2,11 @@ const flightContainer = document.getElementById('flight-container');
 const emptyState = document.getElementById('empty-state');
 const trafficCount = document.getElementById('traffic-count');
 
+// Polling interval tracker - prevents duplicate intervals
+let flightPollingInterval = null;
+let isInitialized = false; // Prevent multiple initializations
+let isFetching = false; // Prevent concurrent fetches
+
 // Banner & History Elements
 const bannerGrid = document.getElementById('banner-grid');
 const historyLogBody = document.getElementById('history-log-body');
@@ -31,11 +36,18 @@ function getAirlineLogo(callsign) {
     if (!callsign || callsign.length < 3) return '';
     // Assume first 3 chars are ICAO airline code (e.g., UAL from UAL123)
     const airlineCode = callsign.substring(0, 3).toUpperCase();
-    // Using raw.githubusercontent for direct image access
-    return `https://raw.githubusercontent.com/Jxck-S/airline-logos/main/flightaware_logos/${airlineCode}.png`;
+    // Using radarbox_logos for better logo quality
+    return `https://raw.githubusercontent.com/Jxck-S/airline-logos/main/radarbox_logos/${airlineCode}.png`;
 }
 
 async function fetchFlights() {
+    // Prevent concurrent fetches (Layer 2 protection)
+    if (isFetching) {
+        console.log('[Fetch] Request already in progress, skipping duplicate call');
+        return;
+    }
+    
+    isFetching = true;
     try {
         const response = await fetch('/api/flights');
         if (!response.ok) throw new Error('Network response was not ok');
@@ -44,6 +56,8 @@ async function fetchFlights() {
         processFlights(flights);
     } catch (error) {
         console.error('Error fetching flights:', error);
+    } finally {
+        isFetching = false;
     }
 }
 
@@ -115,8 +129,8 @@ function processFlights(flights) {
         }
     }
 
-    // Update traffic count
-    if (trafficCount) {
+    // Update traffic count (only if changed to prevent reflow)
+    if (trafficCount && trafficCount.textContent !== String(flights.length)) {
         trafficCount.textContent = flights.length;
     }
 
@@ -124,10 +138,7 @@ function processFlights(flights) {
 
     // renderGrid(flights);
 
-    // 3. Update Traffic Count
-    trafficCount.textContent = flights.length;
-
-    // 4. Update Banner Grid
+    // 3. Update Banner Grid
     renderBannerGrid();
 
     // ... (rest of function)
@@ -321,82 +332,124 @@ function renderBannerGrid() {
         return;
     }
 
-    // Smart update: Only update if the flight list has actually changed
-    const currentFlightIds = Array.from(bannerGrid.children).map(card => card.dataset.icao24);
+    // Get current state
+    const currentCards = Array.from(bannerGrid.children);
+    const currentFlightIds = currentCards.map(card => card.dataset && card.dataset.icao24).filter(Boolean);
     const newFlightIds = bannerFlights.map(f => f.icao24);
     
-    // Check if the flights are the same (same order, same IDs)
-    const hasChanged = currentFlightIds.length !== newFlightIds.length || 
-                       currentFlightIds.some((id, i) => id !== newFlightIds[i]);
+    // Check if structure has changed (flights added/removed or reordered)
+    const structureChanged = currentFlightIds.length !== newFlightIds.length || 
+                             currentFlightIds.some((id, i) => id !== newFlightIds[i]);
     
-    if (!hasChanged) {
-        // No changes - skip re-render to prevent jumpiness
-        return;
-    }
-
-    bannerGrid.innerHTML = bannerFlights.map(flight => {
-        const altFt = Math.round(flight.altitude * 3.28084);
-        const speedMph = Math.round(flight.velocity * 2.237);
-        const vrFpm = Math.round((flight.vertical_rate || 0) * 196.85);
-        const callsign = flight.callsign || flight.icao24;
-        const logoUrl = getAirlineLogo(callsign);
-        const airlineName = getAirlineName(callsign);
-        const category = aircraftCategories[flight.category] || '';
-
-        // Convert heading to cardinal direction
-        const heading = flight.heading || 0;
-        const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-        const directionIndex = Math.round(heading / 45) % 8;
-        const direction = directions[directionIndex];
-
-        // Resolve Names
-        const safeGetAirportName = (code) => {
-            if (typeof getAirportName === 'function') {
-                return getAirportName(code);
+    if (structureChanged) {
+        // Full rebuild needed - use helper function to create HTML
+        bannerGrid.innerHTML = bannerFlights.map(flight => createBannerCardHTML(flight)).join('');
+    } else {
+        // Just update data in existing cards (prevents jumpiness!)
+        bannerFlights.forEach((flight, index) => {
+            if (currentCards[index]) {
+                updateBannerCard(currentCards[index], flight);
             }
-            return code;
-        };
+        });
+    }
+}
 
-        const origin = flight.routeOrigin ? (safeGetAirportName(flight.routeOrigin) || flight.routeOrigin) : (flight.origin_country || 'UNKNOWN');
-        const dest = flight.routeDestination ? (safeGetAirportName(flight.routeDestination) || flight.routeDestination) : '---';
+// Helper function to create banner card HTML (extracted for reusability)
+function createBannerCardHTML(flight) {
+    const altFt = Math.round(flight.altitude * 3.28084);
+    const speedMph = Math.round(flight.velocity * 2.237);
+    const vrFpm = Math.round((flight.vertical_rate || 0) * 196.85);
+    const callsign = flight.callsign || flight.icao24;
+    const logoUrl = getAirlineLogo(callsign);
+    const airlineName = getAirlineName(callsign);
+    const category = aircraftCategories[flight.category] || '';
 
-        // Strip airport codes for banner display: "London (LHR)" → "London"
-        // If no match found, it returns the raw code (e.g., "KEWR"), so we keep it as-is
-        const originCity = origin.includes('(') ? origin.replace(/\s*\([^)]*\)/, '') : origin;
-        const destCity = dest.includes('(') ? dest.replace(/\s*\([^)]*\)/, '') : dest;
+    // Convert heading to cardinal direction
+    const heading = flight.heading || 0;
+    const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    const directionIndex = Math.round(heading / 45) % 8;
+    const direction = directions[directionIndex];
 
-        // Vertical rate indicator
-        const vrIndicator = vrFpm > 500 ? '↗' : vrFpm < -500 ? '↘' : '→';
+    // Resolve Names
+    const safeGetAirportName = (code) => {
+        if (typeof getAirportName === 'function') {
+            return getAirportName(code);
+        }
+        return code;
+    };
 
-        // Aircraft type or category - translate codes to full names
-        const rawType = flight.aircraft_type || category || '';
-        const aircraftInfo = typeof getAircraftTypeName !== 'undefined' ? getAircraftTypeName(rawType) : rawType;
-        
-        // Check if aircraft type is unknown (code matches the display name)
-        const isUnknown = rawType && rawType === aircraftInfo && rawType.length <= 6;
+    const origin = flight.routeOrigin ? (safeGetAirportName(flight.routeOrigin) || flight.routeOrigin) : (flight.origin_country || 'UNKNOWN');
+    const dest = flight.routeDestination ? (safeGetAirportName(flight.routeDestination) || flight.routeDestination) : '---';
 
-        return `
-            <div class="banner-card" data-icao24="${flight.icao24}">
-                <div class="airline-logo-container">
-                    ${logoUrl ? `<img src="${logoUrl}" class="airline-logo-banner" onerror="this.style.display='none'">` : ''}
-                </div>
-                <div class="banner-info">
-                    <div class="banner-callsign">${callsign}</div>
-                    ${airlineName ? `<div class="banner-airline">${airlineName}</div>` : ''}
-                </div>
-                <div class="banner-route">${originCity} → ${destCity}</div>
-                <div class="banner-type ${isUnknown ? 'clickable-aircraft-type' : ''}" 
-                     data-code="${rawType}" 
-                     title="${isUnknown ? 'Click to identify this aircraft type' : aircraftInfo}">
-                    ${aircraftInfo}${isUnknown ? ' ❓' : ''}
-                </div>
-                <div class="banner-metrics">
-                    <span>${altFt.toLocaleString()} FT ${vrIndicator}</span>
-                    <span>${speedMph} MPH ${direction}</span>
-                </div>
+    // Strip airport codes for banner display
+    const originCity = origin.includes('(') ? origin.replace(/\s*\([^)]*\)/, '') : origin;
+    const destCity = dest.includes('(') ? dest.replace(/\s*\([^)]*\)/, '') : dest;
+
+    // Vertical rate indicator
+    const vrIndicator = vrFpm > 500 ? '↗' : vrFpm < -500 ? '↘' : '→';
+
+    // Aircraft type or category - translate codes to full names
+    const rawType = flight.aircraft_type || category || '';
+    const aircraftInfo = typeof getAircraftTypeName !== 'undefined' ? getAircraftTypeName(rawType) : rawType;
+    
+    // Check if aircraft type is unknown
+    const isUnknown = rawType && rawType === aircraftInfo && rawType.length <= 6;
+
+    return `
+        <div class="banner-card" data-icao24="${flight.icao24}">
+            <div class="airline-logo-container">
+                ${logoUrl ? `<img src="${logoUrl}" class="airline-logo-banner" onerror="this.style.display='none'">` : ''}
             </div>
-        `;
-    }).join('');
+            <div class="banner-info">
+                <div class="banner-callsign">${callsign}</div>
+                ${airlineName ? `<div class="banner-airline">${airlineName}</div>` : ''}
+            </div>
+            <div class="banner-route">${originCity} → ${destCity}</div>
+            <div class="banner-type ${isUnknown ? 'clickable-aircraft-type' : ''}" 
+                 data-code="${rawType}" 
+                 title="${isUnknown ? 'Click to identify this aircraft type' : aircraftInfo}">
+                ${aircraftInfo}${isUnknown ? ' ❓' : ''}
+            </div>
+            <div class="banner-metrics">
+                <span class="metric-altitude">${altFt.toLocaleString()} FT ${vrIndicator}</span>
+                <span class="metric-speed">${speedMph} MPH ${direction}</span>
+            </div>
+        </div>
+    `;
+}
+
+// Helper function to update existing banner card data without replacing DOM
+function updateBannerCard(cardElement, flight) {
+    const altFt = Math.round(flight.altitude * 3.28084);
+    const speedMph = Math.round(flight.velocity * 2.237);
+    const vrFpm = Math.round((flight.vertical_rate || 0) * 196.85);
+    
+    // Convert heading to cardinal direction
+    const heading = flight.heading || 0;
+    const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    const directionIndex = Math.round(heading / 45) % 8;
+    const direction = directions[directionIndex];
+    
+    // Vertical rate indicator
+    const vrIndicator = vrFpm > 500 ? '↗' : vrFpm < -500 ? '↘' : '→';
+    
+    // Update only the dynamic metrics (prevents full re-render and jumpiness!)
+    const altSpan = cardElement.querySelector('.metric-altitude');
+    const speedSpan = cardElement.querySelector('.metric-speed');
+    
+    if (altSpan) {
+        const newAltText = `${altFt.toLocaleString()} FT ${vrIndicator}`;
+        if (altSpan.textContent !== newAltText) {
+            altSpan.textContent = newAltText;
+        }
+    }
+    
+    if (speedSpan) {
+        const newSpeedText = `${speedMph} MPH ${direction}`;
+        if (speedSpan.textContent !== newSpeedText) {
+            speedSpan.textContent = newSpeedText;
+        }
+    }
 }
 
 function addToHistory(flight) {
@@ -578,17 +631,29 @@ async function fetchConfig() {
         // Initialize API provider selector (hide if hybrid mode is enabled)
         initializeAPISelector(hybridMode);
 
-        // Start polling with configured interval
-        const interval = config.pollInterval || 10000;
-        console.log(`Setting poll interval to ${interval}ms`);
-        fetchFlights(); // Initial fetch
-        setInterval(fetchFlights, interval);
+        // Only set up polling on first initialization
+        if (!isInitialized) {
+            console.log('[Init] First-time initialization, setting up polling');
+            isInitialized = true;
+            
+            const interval = config.pollInterval || 10000;
+            console.log(`[Polling] Setting poll interval to ${interval}ms`);
+            fetchFlights(); // Initial fetch
+            flightPollingInterval = setInterval(fetchFlights, interval);
+        } else {
+            console.log('[Config] Config updated, polling already active');
+        }
 
     } catch (e) {
         console.error('Failed to fetch config', e);
-        // Fallback
-        fetchFlights();
-        setInterval(fetchFlights, 10000);
+        
+        // Only set up fallback polling if not already initialized
+        if (!isInitialized) {
+            console.log('[Init] Fallback initialization due to config error');
+            isInitialized = true;
+            fetchFlights();
+            flightPollingInterval = setInterval(fetchFlights, 10000);
+        }
     }
 }
 
@@ -799,34 +864,65 @@ document.addEventListener('click', (e) => {
 });
 
 // Initialize
-// Test Data Generator
+// Test Data Generator - Creates a full page of diverse test flights
 function loadTestData() {
     const testFlights = [
-        { icao24: 'a12345', callsign: 'UAL904  ', altitude: 762, velocity: 77.16, vertical_rate: 1.524, heading: 90, category: 3, on_ground: false, latitude: 40.70, longitude: -74.18, origin_country: 'United States', routeOrigin: 'KEWR', routeDestination: 'EGLL', aircraft_type: 'B763' },
-        { icao24: 'b23456', callsign: 'DAL123  ', altitude: 1066.8, velocity: 102.92, vertical_rate: 3.048, heading: 180, category: 3, on_ground: false, latitude: 40.68, longitude: -74.20, origin_country: 'United States', routeOrigin: 'KJFK', routeDestination: 'KATL', aircraft_type: 'B738' },
-        { icao24: 'c34567', callsign: 'AAL456  ', altitude: 1280.16, velocity: 92.64, vertical_rate: -2.438, heading: 270, category: 3, on_ground: false, latitude: 40.72, longitude: -74.15, origin_country: 'United States', routeOrigin: 'KBOS', routeDestination: 'KEWR', aircraft_type: 'A320' },
-        { icao24: 'd45678', callsign: 'JBU789  ', altitude: 548.64, velocity: 66.82, vertical_rate: 3.657, heading: 45, category: 3, on_ground: false, latitude: 40.65, longitude: -74.22, origin_country: 'United States', routeOrigin: 'KMCO', routeDestination: 'KEWR', aircraft_type: 'A321' },
-        { icao24: 'e56789', callsign: 'SWA321  ', altitude: 1554.48, velocity: 113.14, vertical_rate: 0, heading: 135, category: 3, on_ground: false, latitude: 40.74, longitude: -74.12, origin_country: 'United States', routeOrigin: 'KLAS', routeDestination: 'KEWR', aircraft_type: 'B737' },
+        // Major US Airlines
+        { icao24: 'a12345', callsign: 'UAL904  ', altitude: 10668, velocity: 231.5, vertical_rate: 0, heading: 90, category: 3, on_ground: false, latitude: 40.70, longitude: -74.18, origin_country: 'United States', routeOrigin: 'KEWR', routeDestination: 'EGLL', aircraft_type: 'B763' },
+        { icao24: 'b23456', callsign: 'DAL123  ', altitude: 9144, velocity: 205.2, vertical_rate: 3.048, heading: 180, category: 3, on_ground: false, latitude: 40.68, longitude: -74.20, origin_country: 'United States', routeOrigin: 'KJFK', routeDestination: 'KATL', aircraft_type: 'B738' },
+        { icao24: 'c34567', callsign: 'AAL456  ', altitude: 11582, velocity: 246.8, vertical_rate: -2.438, heading: 270, category: 3, on_ground: false, latitude: 40.72, longitude: -74.15, origin_country: 'United States', routeOrigin: 'KBOS', routeDestination: 'KMIA', aircraft_type: 'A321' },
+        { icao24: 'd45678', callsign: 'JBU789  ', altitude: 7620, velocity: 195.3, vertical_rate: 3.657, heading: 45, category: 3, on_ground: false, latitude: 40.65, longitude: -74.22, origin_country: 'United States', routeOrigin: 'KMCO', routeDestination: 'KJFK', aircraft_type: 'A320' },
+        { icao24: 'e56789', callsign: 'SWA321  ', altitude: 10363, velocity: 220.1, vertical_rate: 0, heading: 135, category: 3, on_ground: false, latitude: 40.74, longitude: -74.12, origin_country: 'United States', routeOrigin: 'KLAS', routeDestination: 'KEWR', aircraft_type: 'B737' },
+        
+        // Budget Airlines
+        { icao24: 'f67890', callsign: 'NKS2197 ', altitude: 8534, velocity: 198.7, vertical_rate: 5.08, heading: 195, category: 3, on_ground: false, latitude: 40.71, longitude: -74.17, origin_country: 'United States', routeOrigin: 'KFLL', routeDestination: 'KEWR', aircraft_type: 'A320' },
+        { icao24: 'g78901', callsign: 'FFT1234 ', altitude: 9753, velocity: 210.5, vertical_rate: -1.524, heading: 315, category: 3, on_ground: false, latitude: 40.69, longitude: -74.19, origin_country: 'United States', routeOrigin: 'KDEN', routeDestination: 'KJFK', aircraft_type: 'A321' },
+        
+        // Regional/Commuter
+        { icao24: 'h89012', callsign: 'RPA5709 ', altitude: 5182, velocity: 154.3, vertical_rate: 2.54, heading: 225, category: 3, on_ground: false, latitude: 40.66, longitude: -74.21, origin_country: 'United States', routeOrigin: 'KLGA', routeDestination: 'KDCA', aircraft_type: 'E75S' },
+        { icao24: 'i90123', callsign: 'ENY3456 ', altitude: 4572, velocity: 145.2, vertical_rate: 3.048, heading: 60, category: 3, on_ground: false, latitude: 40.73, longitude: -74.14, origin_country: 'United States', routeOrigin: 'KBOS', routeDestination: 'KEWR', aircraft_type: 'E170' },
+        { icao24: 'j01234', callsign: 'SKW7890 ', altitude: 6096, velocity: 167.8, vertical_rate: 0, heading: 120, category: 3, on_ground: false, latitude: 40.67, longitude: -74.16, origin_country: 'United States', routeOrigin: 'KORD', routeDestination: 'KLGA', aircraft_type: 'CRJ7' },
+        
+        // International
+        { icao24: 'k12345', callsign: 'BAW117  ', altitude: 10972, velocity: 241.3, vertical_rate: 0, heading: 75, category: 4, on_ground: false, latitude: 40.75, longitude: -74.11, origin_country: 'United Kingdom', routeOrigin: 'EGLL', routeDestination: 'KJFK', aircraft_type: 'B77W' },
+        { icao24: 'l23456', callsign: 'ACA865  ', altitude: 9449, velocity: 215.6, vertical_rate: -2.032, heading: 165, category: 3, on_ground: false, latitude: 40.71, longitude: -74.13, origin_country: 'Canada', routeOrigin: 'CYYZ', routeDestination: 'KEWR', aircraft_type: 'A321' },
+        { icao24: 'm34567', callsign: 'WJA2174 ', altitude: 10973, velocity: 232.8, vertical_rate: 0, heading: 205, category: 3, on_ground: false, latitude: 40.73, longitude: -74.24, origin_country: 'Canada', routeOrigin: 'CYHZ', routeDestination: 'MMUN', aircraft_type: 'B738' },
+        { icao24: 'n45678', callsign: 'AFR008  ', altitude: 11887, velocity: 254.7, vertical_rate: 0, heading: 90, category: 4, on_ground: false, latitude: 40.68, longitude: -74.23, origin_country: 'France', routeOrigin: 'LFPG', routeDestination: 'KJFK', aircraft_type: 'A359' },
+        
+        // Cargo
+        { icao24: 'o56789', callsign: 'UPS2845 ', altitude: 8839, velocity: 201.3, vertical_rate: 1.016, heading: 270, category: 3, on_ground: false, latitude: 40.64, longitude: -74.18, origin_country: 'United States', routeOrigin: 'KSDF', routeDestination: 'KEWR', aircraft_type: 'B763' },
+        { icao24: 'p67890', callsign: 'FDX1456 ', altitude: 10058, velocity: 218.9, vertical_rate: -3.048, heading: 180, category: 3, on_ground: false, latitude: 40.76, longitude: -74.10, origin_country: 'United States', routeOrigin: 'KMEM', routeDestination: 'KTEB', aircraft_type: 'B767' },
+        
+        // Low altitude (climbing/descending)
+        { icao24: 'q78901', callsign: 'UAL1021 ', altitude: 2469, velocity: 128.6, vertical_rate: 9.56, heading: 191, category: 3, on_ground: false, latitude: 40.71, longitude: -74.23, origin_country: 'United States', routeOrigin: 'KEWR', routeDestination: 'MPTO', aircraft_type: 'B38M' },
+        { icao24: 'r89012', callsign: 'AAL2312 ', altitude: 8845, velocity: 262.9, vertical_rate: 0, heading: 16, category: 3, on_ground: false, latitude: 40.73, longitude: -74.26, origin_country: 'United States', routeOrigin: 'KDCA', routeDestination: 'KBTV', aircraft_type: 'A319' },
+        
+        // High altitude cruise
+        { icao24: 's90123', callsign: 'UAL886  ', altitude: 12192, velocity: 248.5, vertical_rate: 0, heading: 197, category: 3, on_ground: false, latitude: 40.71, longitude: -74.22, origin_country: 'United States', routeOrigin: 'KEWR', routeDestination: 'SPJC', aircraft_type: 'B752' },
+        { icao24: 't01234', callsign: 'DAL2453 ', altitude: 11582, velocity: 235.7, vertical_rate: 0, heading: 45, category: 3, on_ground: false, latitude: 40.69, longitude: -74.25, origin_country: 'United States', routeOrigin: 'KSEA', routeDestination: 'KJFK', aircraft_type: 'A321' },
     ];
     
-    console.log('[TEST] Loading 5 test flights...');
+    console.log(`[TEST MODE] Loading ${testFlights.length} test flights for UI testing...`);
     processFlights(testFlights);
 }
 
 // Check for test mode
 const urlParams = new URLSearchParams(window.location.search);
-if (urlParams.get('test') === 'true') {
-    console.log('[TEST MODE] Press T to load test data');
+const isTestMode = urlParams.get('test') === 'true';
+
+if (isTestMode) {
+    console.log('[TEST MODE] Enabled - API polling disabled. Press T to load test data');
     document.addEventListener('keydown', (e) => {
         if (e.key === 't' || e.key === 'T') {
             loadTestData();
         }
     });
+} else {
+    // Normal mode - start API polling
+    fetchConfig();
+    fetchCost();
+    setInterval(fetchCost, 30000);
+    
+    // Poll config every 30 seconds to detect server-side provider changes (e.g., hybrid mode auto-switch)
+    setInterval(fetchConfig, 30000);
 }
-
-fetchConfig();
-fetchCost();
-setInterval(fetchCost, 30000);
-
-// Poll config every 30 seconds to detect server-side provider changes (e.g., hybrid mode auto-switch)
-setInterval(fetchConfig, 30000);

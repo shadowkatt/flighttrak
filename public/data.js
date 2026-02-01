@@ -12,6 +12,7 @@ const airlines = {
     'JIA': 'PSA Airlines',
     'EDV': 'Endeavor Air',
     'SKW': 'SkyWest Airlines',
+    'GJS': 'GoJet Airlines',
     'EJA': 'NetJets',
     'GTI': 'Atlas Air',
     'UPS': 'UPS Airlines',
@@ -27,7 +28,9 @@ const airlines = {
     'UAE': 'Emirates',
     'ETD': 'Etihad Airways',
     'WJA': 'WestJet',
-    'ACA': 'Air Canada'
+    'ACA': 'Air Canada',
+    'DWI': 'Arajet',
+    'TAP': 'Air Portugal'
 };
 
 function getAirlineName(icao) {

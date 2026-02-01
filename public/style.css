@@ -319,8 +319,10 @@ header {
   padding: 15px 30px;
   background: linear-gradient(180deg, #0a0a0a 0%, #050505 100%);
   border-bottom: 1px solid #222;
-  min-height: auto;
+  min-height: 0; /* Prevent layout shift */
   max-height: none;
+  /* Prevent content jump during updates */
+  will-change: auto;
   flex: 0 0 auto; /* Don't grow, but can shrink if needed */
   overflow-y: auto;
 }
@@ -340,6 +342,8 @@ header {
   transition: all 0.3s ease;
   min-height: 100px;
   font-size: 1.1rem;
+  /* Prevent layout shift and improve performance */
+  contain: layout style;
 }
 
 .banner-card:hover {
