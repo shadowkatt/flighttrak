@@ -3,6 +3,7 @@
 
 # Cost tracking data (contains usage information)
 cost_tracking.json
+usage-tracking.json
 
 # Node modules
 node_modules/

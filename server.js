@@ -12,6 +12,9 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
+// Usage tracking persistence file
+const USAGE_FILE = path.join(__dirname, 'usage-tracking.json');
+
 // Rate limit tracking for backoff
 let rateLimitBackoff = {
     opensky: {
@@ -44,8 +47,113 @@ let authToken = {
     expiresAt: 0
 };
 
-// API Cost Tracking (in-memory only, no persistence needed)
-const apiCosts = {
+// Calculate next billing reset date (FlightAware & FR24 reset on 1st of each month)
+function getNextMonthlyResetDate() {
+    // Use .env CREDITS_RESET if provided, otherwise calculate next 1st of month
+    if (process.env.CREDITS_RESET) {
+        return new Date(process.env.CREDITS_RESET).toISOString();
+    }
+    
+    const now = new Date();
+    const currentDay = now.getDate();
+    
+    // If we're on or after the 1st, next reset is 1st of next month
+    // Otherwise, next reset is 1st of this month
+    let resetDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    
+    if (currentDay >= 1) {
+        // Move to 1st of next month
+        resetDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    }
+    
+    return resetDate.toISOString();
+}
+
+// Calculate next daily reset date (OpenSky resets daily at midnight UTC)
+function getNextDailyResetDate() {
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    tomorrow.setUTCHours(0, 0, 0, 0);
+    return tomorrow.toISOString();
+}
+
+// Load usage tracking from disk
+async function loadUsageTracking() {
+    try {
+        const data = await fs.readFile(USAGE_FILE, 'utf8');
+        const saved = JSON.parse(data);
+        
+        // Check if we need to reset monthly counters (FA/FR24)
+        const now = new Date();
+        const lastMonthlyReset = new Date(saved.monthly_reset_date || 0);
+        const needsMonthlyReset = now >= lastMonthlyReset;
+        
+        // Check if we need to reset daily counters (OpenSky)
+        const lastDailyReset = new Date(saved.opensky_reset_date || 0);
+        const needsDailyReset = now >= lastDailyReset;
+        
+        if (needsMonthlyReset) {
+            console.log('[Usage Tracking] Monthly reset triggered (FA/FR24)');
+            saved.flightaware = 0;
+            saved.flightaware_calls = 0;
+            saved.flightradar24_calls = 0;
+            saved.flightradar24_credits_used = 0;
+            saved.flightradar24_credits_remaining = 30000;
+            saved.monthly_reset_date = getNextMonthlyResetDate();
+        }
+        
+        if (needsDailyReset) {
+            console.log('[Usage Tracking] Daily reset triggered (OpenSky)');
+            saved.opensky_calls = 0;
+            saved.opensky_reset_date = getNextDailyResetDate();
+        }
+        
+        console.log('[Usage Tracking] Loaded from disk:', {
+            fa_calls: saved.flightaware_calls,
+            fr24_calls: saved.flightradar24_calls,
+            fr24_credits: `${saved.flightradar24_credits_used}/${saved.flightradar24_credits_used + saved.flightradar24_credits_remaining}`,
+            os_calls: saved.opensky_calls,
+            monthly_reset: new Date(saved.monthly_reset_date).toLocaleDateString(),
+            daily_reset: new Date(saved.opensky_reset_date).toLocaleDateString()
+        });
+        
+        return saved;
+    } catch (error) {
+        if (error.code === 'ENOENT') {
+            console.log('[Usage Tracking] No saved data found, starting fresh');
+        } else {
+            console.error('[Usage Tracking] Error loading data:', error.message);
+        }
+        
+        // Return default values
+        return {
+            total: 0,
+            flightaware: 0,
+            opensky: 0,
+            flightradar24: 0,
+            flightaware_calls: 0,
+            opensky_calls: 0,
+            flightradar24_calls: 0,
+            flightradar24_credits_used: 0,
+            flightradar24_credits_remaining: 30000,
+            monthly_reset_date: getNextMonthlyResetDate(),
+            opensky_reset_date: getNextDailyResetDate()
+        };
+    }
+}
+
+// Save usage tracking to disk
+async function saveUsageTracking() {
+    try {
+        await fs.writeFile(USAGE_FILE, JSON.stringify(apiCosts, null, 2), 'utf8');
+    } catch (error) {
+        console.error('[Usage Tracking] Error saving data:', error.message);
+    }
+}
+
+// API Cost Tracking (loaded from disk on startup, saved on updates)
+let apiCosts = {
     total: 0,
     flightaware: 0,
     opensky: 0,
@@ -54,8 +162,10 @@ const apiCosts = {
     opensky_calls: 0,
     flightradar24_calls: 0,
     flightradar24_credits_used: 0,
-    flightradar24_credits_remaining: 30000, // Default to 30K plan
-    reset_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+    flightradar24_credits_remaining: 30000,
+    monthly_reset_date: getNextMonthlyResetDate(),
+    opensky_reset_date: getNextDailyResetDate(),
+    active_enhanced_provider: 'flightradar24' // Persisted UI selection
 };
 
 // API Logging Utility
@@ -122,10 +232,12 @@ const COMMERCIAL_AIRLINES = new Set([
     // US Regional/Commuter
     'RPA', 'JIA', 'EDV', 'SKW', 'ENY', 'CPZ', 'GJS', 'PDT',
     'HAL', 'SCX', 'QXE', 'ASH', 'AWI', 'UCA', 'DJT', 'VJA',
+    // Private/Charter (with public flight info)
+    'EJA', 'LXJ', 'JSX',
     // Cargo/Shipping
     'GTI', 'UPS', 'FDX', 'ABX', 'ATN', 'GEC',
     // Canadian
-    'ACA', 'ROU', 'WJA', 'LOR', 'TSC', 'SWG', 'POE',
+    'ACA', 'ROU', 'WJA', 'LOR', 'TSC', 'SWG', 'POE', 'JZA', 'PTR',
     // European Major
     'BAW', 'VIR', 'AFR', 'DLH', 'KLM', 'SAS', 'EIN', 'IBE', 'CPA', 'TAP',
     'AUA', 'SWR', 'LOT', 'ICE', 'THY', 'SIA',
@@ -151,28 +263,8 @@ function isCommercialFlight(callsign) {
 }
 
 // Enhanced API Provider Selection (only ONE active at a time)
-let ACTIVE_ENHANCED_PROVIDER = process.env.ENHANCED_API_PROVIDER || 'flightradar24';
-
-// In hybrid mode, override provider selection
-if (HYBRID_MODE && FLIGHTAWARE_ENABLED && FLIGHTRADAR24_ENABLED) {
-    ACTIVE_ENHANCED_PROVIDER = 'flightaware'; // Start with FlightAware
-    console.log(`[Hybrid Mode] Enabled - Starting with FlightAware, will auto-switch to Flightradar24 at $${HYBRID_SWITCH_THRESHOLD.toFixed(2)}`);
-} else {
-    // Validate provider setting
-    if (!['flightaware', 'flightradar24'].includes(ACTIVE_ENHANCED_PROVIDER)) {
-        console.warn(`[Config] Invalid ENHANCED_API_PROVIDER: ${ACTIVE_ENHANCED_PROVIDER}, defaulting to flightradar24`);
-        ACTIVE_ENHANCED_PROVIDER = 'flightradar24';
-    }
-
-    // If selected provider isn't available, switch to the other
-    if (ACTIVE_ENHANCED_PROVIDER === 'flightaware' && !FLIGHTAWARE_ENABLED) {
-        console.warn('[Config] FlightAware selected but not enabled, switching to Flightradar24');
-        ACTIVE_ENHANCED_PROVIDER = 'flightradar24';
-    } else if (ACTIVE_ENHANCED_PROVIDER === 'flightradar24' && !FLIGHTRADAR24_ENABLED) {
-        console.warn('[Config] Flightradar24 selected but not enabled, switching to FlightAware');
-        ACTIVE_ENHANCED_PROVIDER = 'flightaware';
-    }
-}
+// Will be loaded from usage-tracking.json on startup, defaults to flightradar24
+let ACTIVE_ENHANCED_PROVIDER = 'flightradar24';
 
 async function getFlightAwareCost() {
     // Check if API key exists
@@ -198,38 +290,44 @@ async function getFlightAwareCost() {
     }
 }
 
-// Cache for FR24 credits (check every 10 minutes like FlightAware)
+// Cache for FR24 credits (check every 30 minutes like FlightAware)
 let fr24CreditsCache = null;
 let fr24CreditsCacheTime = 0;
-const FR24_CREDITS_CACHE_TTL = 10 * 60 * 1000; // 10 minutes - same as FlightAware
+const FR24_CREDITS_CACHE_TTL = 30 * 60 * 1000; // 30 minutes - same as FlightAware
 
 async function getFlightradar24Credits() {
-    // Check if API key exists
+    // FR24 usage API - simple endpoint that returns total credits used
     if (!FLIGHTRADAR24_ENABLED) return { credits_used: 0, credits_remaining: 0, calls: 0 };
-
+    
     // Return cached value if still valid
     if (fr24CreditsCache && (Date.now() - fr24CreditsCacheTime < FR24_CREDITS_CACHE_TTL)) {
         return fr24CreditsCache;
     }
-
+    
     try {
         const startTime = Date.now();
-        // Use /usage endpoint as per FR24 API docs
         const response = await axios.get(`${FLIGHTRADAR24_BASE_URL}/usage`, {
             headers: {
                 'Authorization': `Bearer ${process.env.FLIGHTRADAR24_API_KEY}`,
+                'Accept': 'application/json',
                 'Accept-Version': 'v1'
             },
             params: {
-                period: '30d' // Get usage for last 30 days
+                period: '30d' // Get last 30 days of usage
             }
         });
         const duration = Date.now() - startTime;
-        logAPI('Flightradar24', 'GET', '/usage', response.status, duration);
-
-        // Parse usage data - sum up credits from all endpoints
+        logAPI('Flightradar24', 'GET', '/usage?period=30d', response.status, duration);
+        
+        // FR24 response: { data: [{ endpoint: "...", request_count: 280, credits: "1974" }] }
+        // Multiple endpoints in array - sum them all up
         if (response.data && response.data.data && Array.isArray(response.data.data)) {
-            const totalCredits = response.data.data.reduce((sum, item) => sum + (item.credits || 0), 0);
+            const totalCredits = response.data.data.reduce((sum, item) => {
+                // Credits might be string or number
+                const credits = typeof item.credits === 'string' ? parseInt(item.credits) : (item.credits || 0);
+                return sum + credits;
+            }, 0);
+            
             const totalCalls = response.data.data.reduce((sum, item) => sum + (item.request_count || 0), 0);
             
             // FR24 30K plan
@@ -245,35 +343,27 @@ async function getFlightradar24Credits() {
             fr24CreditsCache = result;
             fr24CreditsCacheTime = Date.now();
             
+            console.log(`[Flightradar24] Usage API: ${totalCalls} calls, ${totalCredits} credits (${response.data.data.length} endpoints)`);
+            
             return result;
         }
-
-        // Default if no data
-        const defaultResult = {
-            credits_used: 0,
-            credits_remaining: 30000,
-            calls: 0
-        };
         
+        // Return zeros if no data
+        const defaultResult = { credits_used: 0, credits_remaining: 30000, calls: 0 };
         fr24CreditsCache = defaultResult;
         fr24CreditsCacheTime = Date.now();
-        
         return defaultResult;
-    } catch (error) {
-        console.error('[Flightradar24] Failed to get credits:', error.message);
         
-        // If we have cached data, return it even if expired
+    } catch (error) {
+        console.error('[Flightradar24] Failed to get usage:', error.message);
+        
+        // Return cached data if available, otherwise zeros
         if (fr24CreditsCache) {
-            console.log('[Flightradar24] Using cached credits data due to API error');
+            console.log('[Flightradar24] Using cached credits due to API error');
             return fr24CreditsCache;
         }
         
-        // Return tracked values if API call fails and no cache
-        return { 
-            credits_used: apiCosts.flightradar24_credits_used, 
-            credits_remaining: apiCosts.flightradar24_credits_remaining,
-            calls: apiCosts.flightradar24_calls 
-        };
+        return { credits_used: 0, credits_remaining: 30000, calls: 0 };
     }
 }
 
@@ -340,8 +430,13 @@ async function updateCostData() {
             console.log(`[System] FR24 credits using local tracking (${localCredits}) - API shows ${apiCredits}`);
         }
     } else {
-        // API unavailable - use local tracking
-        console.log(`[System] FR24 credits using local tracking: ${apiCosts.flightradar24_credits_used}/30000`);
+        // API unavailable or no usage yet - use local tracking
+        // Initialize credits_remaining from default if still at initial value
+        if (apiCosts.flightradar24_credits_remaining === 30000 && apiCosts.flightradar24_credits_used === 0) {
+            console.log(`[System] FR24 credits initialized: 0/30000 (no API usage yet)`);
+        } else {
+            console.log(`[System] FR24 credits using local tracking: ${apiCosts.flightradar24_credits_used}/30000`);
+        }
     }
     
     // FR24 is a flat $9/month subscription, not pay-per-use
@@ -353,13 +448,8 @@ async function updateCostData() {
     apiCosts.total = apiCosts.flightaware + apiCosts.opensky;
     console.log(`[System] Cost updated: $${apiCosts.total.toFixed(4)} (FA: ${apiCosts.flightaware_calls}, OS: ${apiCosts.opensky_calls}, FR24: ${apiCosts.flightradar24_calls} calls, ${fr24Credits.credits_used} credits)`);
     
-    // Hybrid Mode: Auto-switch from FlightAware to Flightradar24 at threshold
-    if (HYBRID_MODE && ACTIVE_ENHANCED_PROVIDER === 'flightaware' && apiCosts.flightaware >= HYBRID_SWITCH_THRESHOLD) {
-        console.log(`\n[Hybrid Mode] FlightAware cost ($${apiCosts.flightaware.toFixed(2)}) reached threshold ($${HYBRID_SWITCH_THRESHOLD.toFixed(2)})`);
-        console.log(`[Hybrid Mode] Auto-switching to Flightradar24...`);
-        ACTIVE_ENHANCED_PROVIDER = 'flightradar24';
-        console.log(`[Hybrid Mode] Now using Flightradar24 for enhanced data\n`);
-    }
+    // Save to disk
+    await saveUsageTracking();
 }
 
 // Flight info cache to prevent duplicate calls
@@ -626,6 +716,9 @@ async function getFlightradar24FlightInfo(callsign, flight) {
         apiCosts.flightradar24_credits_remaining = Math.max(0, 30000 - apiCosts.flightradar24_credits_used);
         
         console.log(`[Flightradar24] Credits: ${creditsForThisCall} used for this call, total: ${apiCosts.flightradar24_credits_used}/${30000}`);
+        
+        // Save updated tracking
+        await saveUsageTracking();
 
         // Log response structure for debugging
         console.log(`[Flightradar24] Response for ${callsign}:`, JSON.stringify(response.data).substring(0, 500));
@@ -740,6 +833,9 @@ async function fetchFlightsFromFR24(lat, lon, offset) {
         apiCosts.flightradar24_credits_remaining = Math.max(0, 30000 - apiCosts.flightradar24_credits_used);
         
         console.log(`[FR24] Credits: ${creditsForThisCall} used, total: ${apiCosts.flightradar24_credits_used}/30000, remaining: ${apiCosts.flightradar24_credits_remaining}`);
+        
+        // Save updated tracking
+        await saveUsageTracking();
         
         // FR24 response structure: { data: [ { ... flight objects ... } ] }
         const rawFlights = response.data?.data || [];
@@ -1069,6 +1165,9 @@ app.get('/api/flights', async (req, res) => {
 
             // Increment call counter
             apiCosts.opensky_calls++;
+            
+            // Save updated tracking
+            await saveUsageTracking();
 
 
             // OpenSky returns { time: number, states: [][] }
@@ -1291,7 +1390,14 @@ app.post('/api/config/provider', express.json(), (req, res) => {
     }
     
     ACTIVE_ENHANCED_PROVIDER = provider;
-    console.log(`[Config] Enhanced API provider changed to: ${provider}`);
+    apiCosts.active_enhanced_provider = provider; // Save to tracking data
+    
+    // Persist the change immediately
+    saveUsageTracking().then(() => {
+        console.log(`[Config] Enhanced API provider changed to: ${provider} (saved to disk)`);
+    }).catch(err => {
+        console.error(`[Config] Failed to save provider change: ${err.message}`);
+    });
     
     res.json({ 
         success: true, 
@@ -1392,10 +1498,13 @@ app.get('/api/cost', async (req, res) => {
         flightradar24: apiCosts.flightradar24.toFixed(4),
         flightaware_calls: apiCosts.flightaware_calls,
         opensky_calls: apiCosts.opensky_calls,
+        opensky_credits_remaining: rateLimitBackoff.opensky.remainingCredits || 4000,
+        opensky_credits_used: rateLimitBackoff.opensky.remainingCredits ? (4000 - rateLimitBackoff.opensky.remainingCredits) : 0,
         flightradar24_calls: apiCosts.flightradar24_calls,
         flightradar24_credits_used: apiCosts.flightradar24_credits_used,
         flightradar24_credits_remaining: apiCosts.flightradar24_credits_remaining,
-        reset_date: apiCosts.reset_date
+        monthly_reset_date: apiCosts.monthly_reset_date, // FA & FR24
+        opensky_reset_date: apiCosts.opensky_reset_date // OpenSky daily
     });
 });
 
@@ -1405,6 +1514,16 @@ async function startServer() {
     // Clear any pending requests from previous shutdown
     pendingFlightRequest = null;
     console.log('[Startup] Cleared pending request state');
+    
+    // Load usage tracking from disk
+    const savedUsage = await loadUsageTracking();
+    Object.assign(apiCosts, savedUsage);
+    
+    // Restore active provider from saved data (UI selection)
+    if (savedUsage.active_enhanced_provider) {
+        ACTIVE_ENHANCED_PROVIDER = savedUsage.active_enhanced_provider;
+        console.log(`[Startup] Restored active provider: ${ACTIVE_ENHANCED_PROVIDER}`);
+    }
     
     // Log configuration
     console.log('\n=== FlightTrak Configuration ===');
@@ -1467,12 +1586,23 @@ async function startServer() {
         console.log(`Using explicit coordinates: ${currentLocation.lat}, ${currentLocation.lon}`);
     }
 
-    // Initial Cost Fetch
-    await updateCostData();
+    // Initial Cost Fetch (FlightAware only - FR24 delayed to avoid rate limits)
+    const faCost = await getFlightAwareCost();
+    apiCosts.flightaware = faCost.cost;
+    apiCosts.flightaware_calls = faCost.calls;
+    apiCosts.total = apiCosts.flightaware + apiCosts.opensky;
+    await saveUsageTracking();
+    console.log(`[Startup] FlightAware cost loaded: $${apiCosts.flightaware.toFixed(4)} (${apiCosts.flightaware_calls} calls)`);
 
     app.listen(PORT, () => {
         console.log(`Server running at http://localhost:${PORT}`);
         console.log(`Monitoring flight traffic around ${currentLocation.lat}, ${currentLocation.lon}`);
+        
+        // Delayed FR24 credit check (20 seconds after startup to avoid rate limits)
+        setTimeout(async () => {
+            console.log('[Startup] Fetching FR24 credits (delayed)...');
+            await updateCostData();
+        }, 20000);
         
         // TEMPORARY ADSB TOGGLE - Log when ADSBexchange mode is active
         // REVERT: Remove this block when USE_ADSB is no longer needed
@@ -1505,8 +1635,8 @@ async function startServer() {
         // END TEMPORARY FR24 TOGGLE
     });
 
-    // Update cost data every 10 minutes
-    setInterval(updateCostData, 10 * 60 * 1000);
+    // Update cost data every 30 minutes
+    setInterval(updateCostData, 30 * 60 * 1000);
 }
 
 startServer();

@@ -554,7 +554,10 @@ async function fetchCost() {
         const res = await fetch('/api/cost');
         const data = await res.json();
 
-        document.getElementById('os-calls').textContent = data.opensky_calls || 0;
+        // OpenSky credits (always visible)
+        const osCreditsUsed = data.opensky_credits_used || 0;
+        const osCreditsRemaining = data.opensky_credits_remaining || 4000;
+        document.getElementById('os-calls').textContent = `${osCreditsUsed}/4000`;
 
         // Show ONLY the active provider's stats
         const faStats = document.getElementById('fa-stats');
@@ -570,17 +573,19 @@ async function fetchCost() {
             fr24Stats.style.display = '';
             document.getElementById('fr24-calls').textContent = data.flightradar24_calls || 0;
             const creditsUsed = data.flightradar24_credits_used || 0;
-            const creditsRemaining = data.flightradar24_credits_remaining || 0;
-            document.getElementById('fr24-credits').textContent = `${creditsUsed}/${creditsUsed + creditsRemaining}`;
+            const creditsRemaining = data.flightradar24_credits_remaining || 30000;
+            const totalCredits = creditsUsed + creditsRemaining;
+            document.getElementById('fr24-credits').textContent = `${creditsUsed}/${totalCredits}`;
         } else {
             // No enhanced provider active
             faStats.style.display = 'none';
             fr24Stats.style.display = 'none';
         }
 
-        if (data.reset_date) {
-            const resetDate = new Date(data.reset_date);
-            document.getElementById('reset-date').textContent = resetDate.toLocaleDateString();
+        // Update reset dates
+        if (data.monthly_reset_date) {
+            const monthlyResetDate = new Date(data.monthly_reset_date);
+            document.getElementById('reset-date').textContent = `Credits Reset: ${monthlyResetDate.toLocaleDateString()}`;
         }
     } catch (error) {
         console.error('Error fetching cost:', error);

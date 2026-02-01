@@ -12,7 +12,11 @@ const airlines = {
     'JIA': 'PSA Airlines',
     'EDV': 'Endeavor Air',
     'SKW': 'SkyWest Airlines',
-    'GJS': 'GoJet Airlines',
+    'GJS': 'United Express',
+    'JZA': 'Air Canada Express',
+    'PTR': 'Porter Airlines',
+    'LXJ': 'Flexjet',
+    'JSX': 'JSX Air',
     'EJA': 'NetJets',
     'GTI': 'Atlas Air',
     'UPS': 'UPS Airlines',
@@ -27,10 +31,12 @@ const airlines = {
     'QTR': 'Qatar Airways',
     'UAE': 'Emirates',
     'ETD': 'Etihad Airways',
+    'ELY': 'El Al Airlines',
     'WJA': 'WestJet',
     'ACA': 'Air Canada',
     'DWI': 'Arajet',
-    'TAP': 'Air Portugal'
+    'TAP': 'Air Portugal',
+    'BMA': 'BermudAir'
 };
 
 function getAirlineName(icao) {

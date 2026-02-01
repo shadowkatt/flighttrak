@@ -89,11 +89,13 @@
     <footer>
         <div class="footer-content">
             <div class="api-calls">
-                <span title="OpenSky Network">OS: <span id="os-calls">0</span> calls</span>
+                <span title="OpenSky Network - Daily credits (resets at midnight UTC)">OS: <span id="os-calls">0/4000</span></span>
                 <span title="FlightAware" id="fa-stats" style="display:none">FA: <span id="fa-calls">0</span> calls ($<span id="fa-cost">0.00</span>)</span>
-                <span title="Flightradar24" id="fr24-stats" style="display:none">FR24: <span id="fr24-calls">0</span> calls (<span id="fr24-credits">0</span> credits)</span>
+                <span title="Flightradar24" id="fr24-stats" style="display:none">FR24: <span id="fr24-calls">0</span> calls (<span id="fr24-credits">0/30000</span> credits)</span>
             </div>
-            <div class="reset-date">Resets: <span id="reset-date">--</span></div>
+            <div class="reset-date">
+                <span id="reset-date" title="FlightAware & Flightradar24 credits reset date">--</span>
+            </div>
         </div>
     </footer>
 
