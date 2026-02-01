@@ -17,6 +17,7 @@ const airlines = {
     'PTR': 'Porter Airlines',
     'LXJ': 'Flexjet',
     'JSX': 'JSX Air',
+    'VJA': 'Vista America',
     'EJA': 'NetJets',
     'GTI': 'Atlas Air',
     'UPS': 'UPS Airlines',

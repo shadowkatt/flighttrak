@@ -165,7 +165,9 @@ let apiCosts = {
     flightradar24_credits_remaining: 30000,
     monthly_reset_date: getNextMonthlyResetDate(),
     opensky_reset_date: getNextDailyResetDate(),
-    active_enhanced_provider: 'flightradar24' // Persisted UI selection
+    active_enhanced_provider: 'flightradar24', // Persisted UI selection
+    opensky_credits_remaining: null, // Track from X-Rate-Limit-Remaining header
+    opensky_daily_limit: 4000 // Can be 4000 or 8000 for contributing users
 };
 
 // API Logging Utility
@@ -1155,10 +1157,23 @@ app.get('/api/flights', async (req, res) => {
                 const remaining = parseInt(response.headers['x-rate-limit-remaining']);
                 rateLimitBackoff.opensky.remainingCredits = remaining;
                 rateLimitBackoff.opensky.lastChecked = Date.now();
-                console.log(`[OpenSky] Rate limit status - Remaining credits: ${remaining}`);
+                
+                // Update apiCosts with actual server-side count
+                apiCosts.opensky_credits_remaining = remaining;
+                
+                // Detect daily limit (4000 for standard, 8000 for contributing users)
+                // If remaining > 4000, user has 8000 credit limit
+                if (remaining > 4000 && apiCosts.opensky_daily_limit !== 8000) {
+                    apiCosts.opensky_daily_limit = 8000;
+                    console.log(`[OpenSky] ✓ Contributing user detected - 8000 daily credits!`);
+                }
+                
+                const dailyLimit = apiCosts.opensky_daily_limit;
+                const used = dailyLimit - remaining;
+                console.log(`[OpenSky] Rate limit status - ${used}/${dailyLimit} credits used (${remaining} remaining)`);
                 
                 // Warn if credits are getting low
-                if (remaining < 5) {
+                if (remaining < 100) {
                     console.warn(`[OpenSky] WARNING: Only ${remaining} API credits remaining!`);
                 }
             }
@@ -1166,7 +1181,7 @@ app.get('/api/flights', async (req, res) => {
             // Increment call counter
             apiCosts.opensky_calls++;
             
-            // Save updated tracking
+            // Save updated tracking (including opensky_credits_remaining from header)
             await saveUsageTracking();
 
 
@@ -1302,8 +1317,20 @@ app.get('/api/route/:icao24', async (req, res) => {
     if (callsign && callsign.length > 2) {
         if (ACTIVE_ENHANCED_PROVIDER === 'flightradar24' && FLIGHTRADAR24_ENABLED) {
             routeData = await getFlightradar24FlightInfo(callsign, flightForLookup);
+            
+            // If FR24 returns null/empty and FlightAware is available, try it as fallback
+            if (!routeData && FLIGHTAWARE_ENABLED) {
+                console.log(`[Route Request] FR24 returned no data for ${callsign}, trying FlightAware fallback...`);
+                routeData = await getFlightAwareFlightInfo(callsign, flightForLookup);
+            }
         } else if (ACTIVE_ENHANCED_PROVIDER === 'flightaware' && FLIGHTAWARE_ENABLED) {
             routeData = await getFlightAwareFlightInfo(callsign, flightForLookup);
+            
+            // If FA returns null/empty and FR24 is available, try it as fallback
+            if (!routeData && FLIGHTRADAR24_ENABLED) {
+                console.log(`[Route Request] FlightAware returned no data for ${callsign}, trying FR24 fallback...`);
+                routeData = await getFlightradar24FlightInfo(callsign, flightForLookup);
+            }
         }
     }
 
@@ -1489,22 +1516,30 @@ app.get('/api/aircraft-types', async (req, res) => {
 
 // API Cost Endpoint
 app.get('/api/cost', async (req, res) => {
-    // Return cached costs only. 
-    // Actual updates are triggered by flight lookups (see scheduleCostUpdate)
+    // Calculate OpenSky credits from actual server-side header data
+    const openskyRemaining = apiCosts.opensky_credits_remaining !== null 
+        ? apiCosts.opensky_credits_remaining 
+        : rateLimitBackoff.opensky.remainingCredits;
+    
+    const openskyDailyLimit = apiCosts.opensky_daily_limit || 4000;
+    const openskyUsed = openskyRemaining !== null ? (openskyDailyLimit - openskyRemaining) : 0;
+    
     res.json({
         total: apiCosts.total.toFixed(4),
         flightaware: apiCosts.flightaware.toFixed(4),
         opensky: apiCosts.opensky.toFixed(4),
         flightradar24: apiCosts.flightradar24.toFixed(4),
         flightaware_calls: apiCosts.flightaware_calls,
-        opensky_calls: apiCosts.opensky_calls,
-        opensky_credits_remaining: rateLimitBackoff.opensky.remainingCredits || 4000,
-        opensky_credits_used: rateLimitBackoff.opensky.remainingCredits ? (4000 - rateLimitBackoff.opensky.remainingCredits) : 0,
+        opensky_calls: apiCosts.opensky_calls, // For backwards compatibility
+        opensky_credits_remaining: openskyRemaining,
+        opensky_credits_used: openskyUsed,
+        opensky_daily_limit: openskyDailyLimit,
         flightradar24_calls: apiCosts.flightradar24_calls,
         flightradar24_credits_used: apiCosts.flightradar24_credits_used,
         flightradar24_credits_remaining: apiCosts.flightradar24_credits_remaining,
         monthly_reset_date: apiCosts.monthly_reset_date, // FA & FR24
-        opensky_reset_date: apiCosts.opensky_reset_date // OpenSky daily
+        opensky_reset_date: apiCosts.opensky_reset_date, // OpenSky daily
+        credits_reset_date: process.env.CREDITS_RESET // Single reset date from .env
     });
 });
 

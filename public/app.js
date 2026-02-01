@@ -556,8 +556,15 @@ async function fetchCost() {
 
         // OpenSky credits (always visible)
         const osCreditsUsed = data.opensky_credits_used || 0;
-        const osCreditsRemaining = data.opensky_credits_remaining || 4000;
-        document.getElementById('os-calls').textContent = `${osCreditsUsed}/4000`;
+        const osCreditsRemaining = data.opensky_credits_remaining;
+        const osDailyLimit = data.opensky_daily_limit || 4000;
+        
+        // Use server-calculated values (from X-Rate-Limit-Remaining header)
+        if (osCreditsRemaining !== null && osCreditsRemaining !== undefined) {
+            document.getElementById('os-calls').textContent = `${osDailyLimit - osCreditsRemaining}/${osDailyLimit}`;
+        } else {
+            document.getElementById('os-calls').textContent = `${osCreditsUsed}/${osDailyLimit}`;
+        }
 
         // Show ONLY the active provider's stats
         const faStats = document.getElementById('fa-stats');
