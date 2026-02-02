@@ -642,20 +642,17 @@ async function getFlightAwareFlightInfo(ident, flight) {
             // Log full response for debugging as requested
             console.log(`[FlightAware] Data for ${ident}:`, JSON.stringify(flight, null, 2));
 
-            // Determine airline display - FlightAware includes operator info
-            let airlineDisplay = flight.operator || flight.operator_icao || null;
-            
-            // Special handling for Republic Airways (RPA) - extract from ident if operating for another airline
-            if (ident.startsWith('RPA') && ident.length > 3) {
-                // RPA flights keep their callsign, can't determine operating airline from FlightAware data
-                airlineDisplay = null; // Will display as "Republic Airways" in UI
-            }
+            // FlightAware doesn't provide painted_as info, so we can't detect regional carrier partnerships
+            // Return null to let client lookup full airline name from callsign
+            let airlineDisplay = null;
+            let airlineLogoCode = null;
 
             const result = {
                 origin: flight.origin?.code_icao || null,
                 destination: flight.destination?.code_icao || null,
                 aircraft_type: flight.aircraft_type || null,
-                airline: airlineDisplay,
+                airline: airlineDisplay, // Always null - client will lookup full name
+                airline_logo_code: airlineLogoCode, // Always null - use callsign for logo
                 source: 'flightaware'
             };
 
