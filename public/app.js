@@ -214,8 +214,8 @@ function renderGrid(flights) {
         
         const category = aircraftCategories[flight.category] || '';
         
-        // Expand airline codes: "RPA (UAL)" -> "Republic Airways (United Airlines)"
-        const airlineDisplay = expandAirlineDisplay(flight.airline) || getAirlineName(callsign);
+        // Use API airline if available (e.g., "RPA (UAL)"), otherwise lookup full name
+        const airlineDisplay = flight.airline || getAirlineName(callsign);
 
         return `
             <div class="flight-card">
@@ -377,8 +377,8 @@ function createBannerCardHTML(flight) {
     const logoCallsign = flight.airline_logo_code || callsign;
     const logoUrl = getAirlineLogo(logoCallsign);
     
-    // Expand airline codes: "RPA (UAL)" -> "Republic Airways (United Airlines)"
-    const airlineName = expandAirlineDisplay(flight.airline) || getAirlineName(callsign);
+    // Use API airline if available (e.g., "RPA (UAL)"), otherwise lookup full name
+    const airlineName = flight.airline || getAirlineName(callsign);
     const category = aircraftCategories[flight.category] || '';
 
     // Convert heading to cardinal direction
@@ -501,7 +501,7 @@ function addToHistory(flight) {
         speed: speedMph,
         vr: vrFpm,
         logo: logoUrl,
-        airline: expandAirlineDisplay(flight.airline) || getAirlineName(callsign), // Expand codes
+        airline: flight.airline || getAirlineName(callsign), // Use API airline (e.g., "RPA (UAL)")
         type: flight.aircraft_type || aircraftCategories[flight.category] || 'N/A'
     };
 

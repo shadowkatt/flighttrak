@@ -47,22 +47,3 @@ function getAirlineName(icao) {
     return airlines[prefix] || icao;
 }
 
-// Expand airline codes in display text (e.g., "RPA (UAL)" -> "Republic Airways (United Airlines)")
-function expandAirlineDisplay(displayText) {
-    if (!displayText) return displayText;
-    
-    // Check if it matches pattern like "RPA (UAL)" or "EDV (DAL)"
-    const match = displayText.match(/^([A-Z]{3})\s*\(([A-Z]{3})\)$/);
-    if (match) {
-        const operator = match[1]; // e.g., "RPA"
-        const partner = match[2];  // e.g., "UAL"
-        
-        const operatorName = getAirlineName(operator);
-        const partnerName = getAirlineName(partner);
-        
-        return `${operatorName} (${partnerName})`;
-    }
-    
-    return displayText;
-}
-
