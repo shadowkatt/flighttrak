@@ -402,12 +402,12 @@ header {
   line-height: 1.4;
 }
 
-.banner-eta {
-  font-size: 1.1rem;
-  color: var(--accent-color);
-  font-weight: 600;
-  text-align: center;
-  margin: 2px 0;
+.eta-inline {
+  font-size: 0.95rem;
+  color: #ffa500;
+  font-weight: 500;
+  margin-left: 4px;
+  white-space: nowrap;
 }
 
 .banner-type {

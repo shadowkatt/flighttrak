@@ -410,9 +410,11 @@ function createBannerCardHTML(flight) {
     if (flight.eta) {
         try {
             const etaDate = new Date(flight.eta);
-            const hours = etaDate.getHours().toString().padStart(2, '0');
+            const hours = etaDate.getHours();
             const minutes = etaDate.getMinutes().toString().padStart(2, '0');
-            etaDisplay = `ETA ${hours}:${minutes}`;
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            const displayHours = hours % 12 || 12;
+            etaDisplay = `ETA ${displayHours}:${minutes} ${ampm}`;
         } catch (e) {
             // Invalid date, skip ETA display
         }
@@ -437,8 +439,7 @@ function createBannerCardHTML(flight) {
                 <div class="banner-callsign">${callsign}</div>
                 ${airlineName ? `<div class="banner-airline">${airlineName}</div>` : ''}
             </div>
-            <div class="banner-route">${originCity} → ${destCity}</div>
-            ${etaDisplay ? `<div class="banner-eta">${etaDisplay}</div>` : ''}
+            <div class="banner-route">${originCity} → ${destCity}${etaDisplay ? ` <span class="eta-inline">(${etaDisplay})</span>` : ''}</div>
             <div class="banner-type ${isUnknown ? 'clickable-aircraft-type' : ''}" 
                  data-code="${rawType}" 
                  title="${isUnknown ? 'Click to identify this aircraft type' : aircraftInfo}">
@@ -466,6 +467,42 @@ function updateBannerCard(cardElement, flight) {
     
     // Vertical rate indicator
     const vrIndicator = vrFpm > 500 ? '↗' : vrFpm < -500 ? '↘' : '→';
+    
+    // Format ETA if available
+    let etaDisplay = '';
+    if (flight.eta) {
+        try {
+            const etaDate = new Date(flight.eta);
+            const hours = etaDate.getHours();
+            const minutes = etaDate.getMinutes().toString().padStart(2, '0');
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            const displayHours = hours % 12 || 12;
+            etaDisplay = `ETA ${displayHours}:${minutes} ${ampm}`;
+        } catch (e) {
+            // Invalid date, skip ETA display
+        }
+    }
+    
+    // Update route with ETA
+    const safeGetAirportName = (code) => {
+        if (typeof getAirportName === 'function') {
+            return getAirportName(code);
+        }
+        return code;
+    };
+    
+    const origin = flight.routeOrigin ? (safeGetAirportName(flight.routeOrigin) || flight.routeOrigin) : (flight.origin_country || 'UNKNOWN');
+    const dest = flight.routeDestination ? (safeGetAirportName(flight.routeDestination) || flight.routeDestination) : '---';
+    const originCity = origin.includes('(') ? origin.replace(/\s*\([^)]*\)/, '') : origin;
+    const destCity = dest.includes('(') ? dest.replace(/\s*\([^)]*\)/, '') : dest;
+    
+    const routeElement = cardElement.querySelector('.banner-route');
+    if (routeElement) {
+        const newRouteHTML = `${originCity} → ${destCity}${etaDisplay ? ` <span class="eta-inline">(${etaDisplay})</span>` : ''}`;
+        if (routeElement.innerHTML !== newRouteHTML) {
+            routeElement.innerHTML = newRouteHTML;
+        }
+    }
     
     // Update only the dynamic metrics (prevents full re-render and jumpiness!)
     const altSpan = cardElement.querySelector('.metric-altitude');
