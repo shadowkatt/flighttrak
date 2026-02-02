@@ -106,6 +106,9 @@ function processFlights(flights) {
                     if (route.airline_logo_code) {
                         flight.airline_logo_code = route.airline_logo_code; // Store partner airline code for logo
                     }
+                    if (route.eta) {
+                        flight.eta = route.eta; // Store estimated arrival time
+                    }
 
                     // Show popup and banner for all flights (server-side filtering handles private flights)
                     showFlightPopup(flight);
@@ -402,6 +405,19 @@ function createBannerCardHTML(flight) {
     const originCity = origin.includes('(') ? origin.replace(/\s*\([^)]*\)/, '') : origin;
     const destCity = dest.includes('(') ? dest.replace(/\s*\([^)]*\)/, '') : dest;
 
+    // Format ETA if available
+    let etaDisplay = '';
+    if (flight.eta) {
+        try {
+            const etaDate = new Date(flight.eta);
+            const hours = etaDate.getHours().toString().padStart(2, '0');
+            const minutes = etaDate.getMinutes().toString().padStart(2, '0');
+            etaDisplay = `ETA ${hours}:${minutes}`;
+        } catch (e) {
+            // Invalid date, skip ETA display
+        }
+    }
+
     // Vertical rate indicator
     const vrIndicator = vrFpm > 500 ? '↗' : vrFpm < -500 ? '↘' : '→';
 
@@ -422,6 +438,7 @@ function createBannerCardHTML(flight) {
                 ${airlineName ? `<div class="banner-airline">${airlineName}</div>` : ''}
             </div>
             <div class="banner-route">${originCity} → ${destCity}</div>
+            ${etaDisplay ? `<div class="banner-eta">${etaDisplay}</div>` : ''}
             <div class="banner-type ${isUnknown ? 'clickable-aircraft-type' : ''}" 
                  data-code="${rawType}" 
                  title="${isUnknown ? 'Click to identify this aircraft type' : aircraftInfo}">
@@ -895,36 +912,43 @@ document.addEventListener('click', (e) => {
 // Initialize
 // Test Data Generator - Creates a full page of diverse test flights
 function loadTestData() {
+    // Generate ETAs (30 min to 3 hours from now)
+    const now = new Date();
+    const generateETA = (minutesFromNow) => {
+        const eta = new Date(now.getTime() + minutesFromNow * 60000);
+        return eta.toISOString();
+    };
+    
     const testFlights = [
         // Major US Airlines
-        { icao24: 'a12345', callsign: 'UAL904  ', altitude: 10668, velocity: 231.5, vertical_rate: 0, heading: 90, category: 3, on_ground: false, latitude: 40.70, longitude: -74.18, origin_country: 'United States', routeOrigin: 'KEWR', routeDestination: 'EGLL', aircraft_type: 'B763' },
-        { icao24: 'b23456', callsign: 'DAL123  ', altitude: 9144, velocity: 205.2, vertical_rate: 3.048, heading: 180, category: 3, on_ground: false, latitude: 40.68, longitude: -74.20, origin_country: 'United States', routeOrigin: 'KJFK', routeDestination: 'KATL', aircraft_type: 'B738' },
-        { icao24: 'c34567', callsign: 'AAL456  ', altitude: 11582, velocity: 246.8, vertical_rate: -2.438, heading: 270, category: 3, on_ground: false, latitude: 40.72, longitude: -74.15, origin_country: 'United States', routeOrigin: 'KBOS', routeDestination: 'KMIA', aircraft_type: 'A321' },
-        { icao24: 'd45678', callsign: 'JBU789  ', altitude: 7620, velocity: 195.3, vertical_rate: 3.657, heading: 45, category: 3, on_ground: false, latitude: 40.65, longitude: -74.22, origin_country: 'United States', routeOrigin: 'KMCO', routeDestination: 'KJFK', aircraft_type: 'A320' },
-        { icao24: 'e56789', callsign: 'SWA321  ', altitude: 10363, velocity: 220.1, vertical_rate: 0, heading: 135, category: 3, on_ground: false, latitude: 40.74, longitude: -74.12, origin_country: 'United States', routeOrigin: 'KLAS', routeDestination: 'KEWR', aircraft_type: 'B737' },
+        { icao24: 'a12345', callsign: 'UAL904  ', altitude: 10668, velocity: 231.5, vertical_rate: 0, heading: 90, category: 3, on_ground: false, latitude: 40.70, longitude: -74.18, origin_country: 'United States', routeOrigin: 'KEWR', routeDestination: 'EGLL', aircraft_type: 'B763', eta: generateETA(120) },
+        { icao24: 'b23456', callsign: 'DAL123  ', altitude: 9144, velocity: 205.2, vertical_rate: 3.048, heading: 180, category: 3, on_ground: false, latitude: 40.68, longitude: -74.20, origin_country: 'United States', routeOrigin: 'KJFK', routeDestination: 'KATL', aircraft_type: 'B738', eta: generateETA(45) },
+        { icao24: 'c34567', callsign: 'AAL456  ', altitude: 11582, velocity: 246.8, vertical_rate: -2.438, heading: 270, category: 3, on_ground: false, latitude: 40.72, longitude: -74.15, origin_country: 'United States', routeOrigin: 'KBOS', routeDestination: 'KMIA', aircraft_type: 'A321', eta: generateETA(90) },
+        { icao24: 'd45678', callsign: 'JBU789  ', altitude: 7620, velocity: 195.3, vertical_rate: 3.657, heading: 45, category: 3, on_ground: false, latitude: 40.65, longitude: -74.22, origin_country: 'United States', routeOrigin: 'KMCO', routeDestination: 'KJFK', aircraft_type: 'A320', eta: generateETA(35) },
+        { icao24: 'e56789', callsign: 'SWA321  ', altitude: 10363, velocity: 220.1, vertical_rate: 0, heading: 135, category: 3, on_ground: false, latitude: 40.74, longitude: -74.12, origin_country: 'United States', routeOrigin: 'KLAS', routeDestination: 'KEWR', aircraft_type: 'B737', eta: generateETA(180) },
         
         // Budget Airlines
-        { icao24: 'f67890', callsign: 'NKS2197 ', altitude: 8534, velocity: 198.7, vertical_rate: 5.08, heading: 195, category: 3, on_ground: false, latitude: 40.71, longitude: -74.17, origin_country: 'United States', routeOrigin: 'KFLL', routeDestination: 'KEWR', aircraft_type: 'A320' },
-        { icao24: 'g78901', callsign: 'FFT1234 ', altitude: 9753, velocity: 210.5, vertical_rate: -1.524, heading: 315, category: 3, on_ground: false, latitude: 40.69, longitude: -74.19, origin_country: 'United States', routeOrigin: 'KDEN', routeDestination: 'KJFK', aircraft_type: 'A321' },
+        { icao24: 'f67890', callsign: 'NKS2197 ', altitude: 8534, velocity: 198.7, vertical_rate: 5.08, heading: 195, category: 3, on_ground: false, latitude: 40.71, longitude: -74.17, origin_country: 'United States', routeOrigin: 'KFLL', routeDestination: 'KEWR', aircraft_type: 'A320', eta: generateETA(60) },
+        { icao24: 'g78901', callsign: 'FFT1234 ', altitude: 9753, velocity: 210.5, vertical_rate: -1.524, heading: 315, category: 3, on_ground: false, latitude: 40.69, longitude: -74.19, origin_country: 'United States', routeOrigin: 'KDEN', routeDestination: 'KJFK', aircraft_type: 'A321', eta: generateETA(75) },
         
         // Regional/Commuter
-        { icao24: 'h89012', callsign: 'RPA5709 ', altitude: 5182, velocity: 154.3, vertical_rate: 2.54, heading: 225, category: 3, on_ground: false, latitude: 40.66, longitude: -74.21, origin_country: 'United States', routeOrigin: 'KLGA', routeDestination: 'KDCA', aircraft_type: 'E75S' },
-        { icao24: 'i90123', callsign: 'ENY3456 ', altitude: 4572, velocity: 145.2, vertical_rate: 3.048, heading: 60, category: 3, on_ground: false, latitude: 40.73, longitude: -74.14, origin_country: 'United States', routeOrigin: 'KBOS', routeDestination: 'KEWR', aircraft_type: 'E170' },
-        { icao24: 'j01234', callsign: 'SKW7890 ', altitude: 6096, velocity: 167.8, vertical_rate: 0, heading: 120, category: 3, on_ground: false, latitude: 40.67, longitude: -74.16, origin_country: 'United States', routeOrigin: 'KORD', routeDestination: 'KLGA', aircraft_type: 'CRJ7' },
+        { icao24: 'h89012', callsign: 'RPA5709 ', altitude: 5182, velocity: 154.3, vertical_rate: 2.54, heading: 225, category: 3, on_ground: false, latitude: 40.66, longitude: -74.21, origin_country: 'United States', routeOrigin: 'KLGA', routeDestination: 'KDCA', aircraft_type: 'E75S', eta: generateETA(30) },
+        { icao24: 'i90123', callsign: 'ENY3456 ', altitude: 4572, velocity: 145.2, vertical_rate: 3.048, heading: 60, category: 3, on_ground: false, latitude: 40.73, longitude: -74.14, origin_country: 'United States', routeOrigin: 'KBOS', routeDestination: 'KEWR', aircraft_type: 'E170', eta: generateETA(40) },
+        { icao24: 'j01234', callsign: 'SKW7890 ', altitude: 6096, velocity: 167.8, vertical_rate: 0, heading: 120, category: 3, on_ground: false, latitude: 40.67, longitude: -74.16, origin_country: 'United States', routeOrigin: 'KORD', routeDestination: 'KLGA', aircraft_type: 'CRJ7', eta: generateETA(55) },
         
         // International
-        { icao24: 'k12345', callsign: 'BAW117  ', altitude: 10972, velocity: 241.3, vertical_rate: 0, heading: 75, category: 4, on_ground: false, latitude: 40.75, longitude: -74.11, origin_country: 'United Kingdom', routeOrigin: 'EGLL', routeDestination: 'KJFK', aircraft_type: 'B77W' },
-        { icao24: 'l23456', callsign: 'ACA865  ', altitude: 9449, velocity: 215.6, vertical_rate: -2.032, heading: 165, category: 3, on_ground: false, latitude: 40.71, longitude: -74.13, origin_country: 'Canada', routeOrigin: 'CYYZ', routeDestination: 'KEWR', aircraft_type: 'A321' },
-        { icao24: 'm34567', callsign: 'WJA2174 ', altitude: 10973, velocity: 232.8, vertical_rate: 0, heading: 205, category: 3, on_ground: false, latitude: 40.73, longitude: -74.24, origin_country: 'Canada', routeOrigin: 'CYHZ', routeDestination: 'MMUN', aircraft_type: 'B738' },
-        { icao24: 'n45678', callsign: 'AFR008  ', altitude: 11887, velocity: 254.7, vertical_rate: 0, heading: 90, category: 4, on_ground: false, latitude: 40.68, longitude: -74.23, origin_country: 'France', routeOrigin: 'LFPG', routeDestination: 'KJFK', aircraft_type: 'A359' },
+        { icao24: 'k12345', callsign: 'BAW117  ', altitude: 10972, velocity: 241.3, vertical_rate: 0, heading: 75, category: 4, on_ground: false, latitude: 40.75, longitude: -74.11, origin_country: 'United Kingdom', routeOrigin: 'EGLL', routeDestination: 'KJFK', aircraft_type: 'B77W', eta: generateETA(150) },
+        { icao24: 'l23456', callsign: 'ACA865  ', altitude: 9449, velocity: 215.6, vertical_rate: -2.032, heading: 165, category: 3, on_ground: false, latitude: 40.71, longitude: -74.13, origin_country: 'Canada', routeOrigin: 'CYYZ', routeDestination: 'KEWR', aircraft_type: 'A321', eta: generateETA(50) },
+        { icao24: 'm34567', callsign: 'WJA2174 ', altitude: 10973, velocity: 232.8, vertical_rate: 0, heading: 205, category: 3, on_ground: false, latitude: 40.73, longitude: -74.24, origin_country: 'Canada', routeOrigin: 'CYHZ', routeDestination: 'MMUN', aircraft_type: 'B738', eta: generateETA(95) },
+        { icao24: 'n45678', callsign: 'AFR008  ', altitude: 11887, velocity: 254.7, vertical_rate: 0, heading: 90, category: 4, on_ground: false, latitude: 40.68, longitude: -74.23, origin_country: 'France', routeOrigin: 'LFPG', routeDestination: 'KJFK', aircraft_type: 'A359', eta: generateETA(135) },
         
         // Cargo
-        { icao24: 'o56789', callsign: 'UPS2845 ', altitude: 8839, velocity: 201.3, vertical_rate: 1.016, heading: 270, category: 3, on_ground: false, latitude: 40.64, longitude: -74.18, origin_country: 'United States', routeOrigin: 'KSDF', routeDestination: 'KEWR', aircraft_type: 'B763' },
-        { icao24: 'p67890', callsign: 'FDX1456 ', altitude: 10058, velocity: 218.9, vertical_rate: -3.048, heading: 180, category: 3, on_ground: false, latitude: 40.76, longitude: -74.10, origin_country: 'United States', routeOrigin: 'KMEM', routeDestination: 'KTEB', aircraft_type: 'B767' },
+        { icao24: 'o56789', callsign: 'UPS2845 ', altitude: 8839, velocity: 201.3, vertical_rate: 1.016, heading: 270, category: 3, on_ground: false, latitude: 40.64, longitude: -74.18, origin_country: 'United States', routeOrigin: 'KSDF', routeDestination: 'KEWR', aircraft_type: 'B763', eta: generateETA(65) },
+        { icao24: 'p67890', callsign: 'FDX1456 ', altitude: 10058, velocity: 218.9, vertical_rate: -3.048, heading: 180, category: 3, on_ground: false, latitude: 40.76, longitude: -74.10, origin_country: 'United States', routeOrigin: 'KMEM', routeDestination: 'KTEB', aircraft_type: 'B767', eta: generateETA(85) },
         
         // Low altitude (climbing/descending)
-        { icao24: 'q78901', callsign: 'UAL1021 ', altitude: 2469, velocity: 128.6, vertical_rate: 9.56, heading: 191, category: 3, on_ground: false, latitude: 40.71, longitude: -74.23, origin_country: 'United States', routeOrigin: 'KEWR', routeDestination: 'MPTO', aircraft_type: 'B38M' },
-        { icao24: 'r89012', callsign: 'AAL2312 ', altitude: 8845, velocity: 262.9, vertical_rate: 0, heading: 16, category: 3, on_ground: false, latitude: 40.73, longitude: -74.26, origin_country: 'United States', routeOrigin: 'KDCA', routeDestination: 'KBTV', aircraft_type: 'A319' },
+        { icao24: 'q78901', callsign: 'UAL1021 ', altitude: 2469, velocity: 128.6, vertical_rate: 9.56, heading: 191, category: 3, on_ground: false, latitude: 40.71, longitude: -74.23, origin_country: 'United States', routeOrigin: 'KEWR', routeDestination: 'MPTO', aircraft_type: 'B38M', eta: generateETA(110) },
+        { icao24: 'r89012', callsign: 'AAL2312 ', altitude: 8845, velocity: 262.9, vertical_rate: 0, heading: 16, category: 3, on_ground: false, latitude: 40.73, longitude: -74.26, origin_country: 'United States', routeOrigin: 'KDCA', routeDestination: 'KBTV', aircraft_type: 'A319', eta: generateETA(42) },
         
         // High altitude cruise
         { icao24: 's90123', callsign: 'UAL886  ', altitude: 12192, velocity: 248.5, vertical_rate: 0, heading: 197, category: 3, on_ground: false, latitude: 40.71, longitude: -74.22, origin_country: 'United States', routeOrigin: 'KEWR', routeDestination: 'SPJC', aircraft_type: 'B752' },

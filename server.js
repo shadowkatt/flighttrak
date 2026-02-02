@@ -655,6 +655,7 @@ async function getFlightAwareFlightInfo(ident, flight) {
                 aircraft_type: flight.aircraft_type || null,
                 airline: airlineDisplay, // Always null - client will lookup full name
                 airline_logo_code: airlineLogoCode, // Always null - use callsign for logo
+                eta: flight.estimated_on || flight.scheduled_on || null, // Estimated or scheduled arrival
                 source: 'flightaware'
             };
 
@@ -771,6 +772,7 @@ async function getFlightradar24FlightInfo(callsign, flight) {
                 airline: airlineDisplay, // Only set for regional carriers
                 airline_logo_code: airlineLogoCode, // Only set for regional carriers
                 aircraft_registration: flightData.reg || null,
+                eta: flightData.eta || null, // Estimated time of arrival (ISO 8601)
                 source: 'flightradar24'
             };
 

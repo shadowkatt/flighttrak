@@ -402,6 +402,14 @@ header {
   line-height: 1.4;
 }
 
+.banner-eta {
+  font-size: 1.1rem;
+  color: var(--accent-color);
+  font-weight: 600;
+  text-align: center;
+  margin: 2px 0;
+}
+
 .banner-type {
   font-size: 1.1rem;
   color: var(--accent-color);
