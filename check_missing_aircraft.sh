@@ -50,3 +50,4 @@ echo "Tip: To see full logs, run: docker-compose logs --tail=500 | grep aircraft
 
 
 
+

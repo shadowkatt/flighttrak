@@ -749,19 +749,27 @@ async function getFlightradar24FlightInfo(callsign, flight) {
             // Special handling for regional airlines operating for major carriers
             // Republic Airways (RPA) operates for American Airlines (AAL), Delta Air Lines (DAL), and United Airlines (UAL)
             // Endeavor Air (EDV) operates exclusively for Delta Air Lines (DAL)
+            // GoJet Airlines (GJS) operates for United Airlines (UAL) and Delta Air Lines (DAL)
             if (flightData.operating_as === 'RPA' && flightData.painted_as) {
                 const partnerAirlines = ['AAL', 'DAL', 'UAL'];
                 if (partnerAirlines.includes(flightData.painted_as)) {
-                    airlineDisplay = `RPA (${flightData.painted_as})`;
+                    airlineDisplay = `Republic Airways (${flightData.painted_as})`;
                     airlineLogoCode = flightData.painted_as; // Use partner logo
                     console.log(`[Flightradar24] Republic Airways operating as ${flightData.painted_as} for ${callsign}`);
                 }
             } else if (flightData.operating_as === 'EDV' && flightData.painted_as) {
                 const partnerAirlines = ['DAL'];
                 if (partnerAirlines.includes(flightData.painted_as)) {
-                    airlineDisplay = `EDV (${flightData.painted_as})`;
+                    airlineDisplay = `Endeavor Air (${flightData.painted_as})`;
                     airlineLogoCode = flightData.painted_as; // Use partner logo
                     console.log(`[Flightradar24] Endeavor Air operating as ${flightData.painted_as} for ${callsign}`);
+                }
+            } else if (flightData.operating_as === 'GJS' && flightData.painted_as) {
+                const partnerAirlines = ['UAL', 'DAL'];
+                if (partnerAirlines.includes(flightData.painted_as)) {
+                    airlineDisplay = `GoJet (${flightData.painted_as})`;
+                    airlineLogoCode = flightData.painted_as; // Use partner logo
+                    console.log(`[Flightradar24] GoJet operating as ${flightData.painted_as} for ${callsign}`);
                 }
             }
 

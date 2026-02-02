@@ -15,7 +15,7 @@ const airlines = {
     'JIA': 'PSA Airlines',
     'EDV': 'Endeavor Air',
     'SKW': 'SkyWest Airlines',
-    'GJS': 'United Express',
+    'GJS': 'GoJet',
     'JZA': 'Air Canada Express',
     'PTR': 'Porter Airlines',
     'LXJ': 'Flexjet',
