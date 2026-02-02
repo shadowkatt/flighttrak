@@ -743,7 +743,8 @@ async function getFlightradar24FlightInfo(callsign, flight) {
             console.log(`[Flightradar24] Data for ${callsign}:`, JSON.stringify(flightData, null, 2));
 
             // Determine airline display name
-            let airlineDisplay = flightData.operating_as || flightData.painted_as || null;
+            let airlineDisplay = null; // Default to null so client looks up full name
+            let airlineLogoCode = null;
             
             // Special handling for regional airlines operating for major carriers
             // Republic Airways (RPA) operates for American Airlines (AAL), Delta Air Lines (DAL), and United Airlines (UAL)
@@ -752,12 +753,14 @@ async function getFlightradar24FlightInfo(callsign, flight) {
                 const partnerAirlines = ['AAL', 'DAL', 'UAL'];
                 if (partnerAirlines.includes(flightData.painted_as)) {
                     airlineDisplay = `RPA (${flightData.painted_as})`;
+                    airlineLogoCode = flightData.painted_as; // Use partner logo
                     console.log(`[Flightradar24] Republic Airways operating as ${flightData.painted_as} for ${callsign}`);
                 }
             } else if (flightData.operating_as === 'EDV' && flightData.painted_as) {
                 const partnerAirlines = ['DAL'];
                 if (partnerAirlines.includes(flightData.painted_as)) {
                     airlineDisplay = `EDV (${flightData.painted_as})`;
+                    airlineLogoCode = flightData.painted_as; // Use partner logo
                     console.log(`[Flightradar24] Endeavor Air operating as ${flightData.painted_as} for ${callsign}`);
                 }
             }
@@ -766,10 +769,8 @@ async function getFlightradar24FlightInfo(callsign, flight) {
                 origin: flightData.orig_icao || null,
                 destination: flightData.dest_icao || null,
                 aircraft_type: flightData.type || null,
-                airline: airlineDisplay,
-                airline_logo_code: (flightData.operating_as === 'RPA' || flightData.operating_as === 'EDV') && flightData.painted_as 
-                    ? flightData.painted_as // Use partner airline code for logo
-                    : null,
+                airline: airlineDisplay, // Only set for regional carriers
+                airline_logo_code: airlineLogoCode, // Only set for regional carriers
                 aircraft_registration: flightData.reg || null,
                 source: 'flightradar24'
             };
