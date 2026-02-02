@@ -230,10 +230,10 @@ const FILTER_PRIVATE_FLIGHTS = PRIVATE_FLIGHTS === 'no';
 // Commercial Airlines - Consolidated list of all commercial airline ICAO codes
 const COMMERCIAL_AIRLINES = new Set([
     // US Major Airlines
-    'UAL', 'AAL', 'DAL', 'SWA', 'JBU', 'ASA', 'NKS', 'FFT',
+    'UAL', 'AAL', 'DAL', 'SWA', 'JBU', 'ASA', 'NKS', 'FFT', 'HAL', 'BRE', 'AVX',
     // US Regional/Commuter
     'RPA', 'JIA', 'EDV', 'SKW', 'ENY', 'CPZ', 'GJS', 'PDT',
-    'HAL', 'SCX', 'QXE', 'ASH', 'AWI', 'UCA', 'DJT', 'VJA',
+    'SCX', 'QXE', 'ASH', 'AWI', 'UCA', 'DJT', 'VJA',
     // Private/Charter (with public flight info)
     'EJA', 'LXJ', 'JSX', 'TIV',
     // Cargo/Shipping
@@ -241,19 +241,21 @@ const COMMERCIAL_AIRLINES = new Set([
     // Canadian
     'ACA', 'ROU', 'WJA', 'LOR', 'TSC', 'SWG', 'POE', 'JZA', 'PTR',
     // European Major
-    'BAW', 'VIR', 'AFR', 'DLH', 'KLM', 'SAS', 'EIN', 'IBE', 'CPA', 'TAP',
-    'AUA', 'SWR', 'LOT', 'ICE', 'THY', 'SIA',
+    'BAW', 'VIR', 'AFR', 'DLH', 'KLM', 'SAS', 'EIN', 'IBE', 'TAP',
+    'AUA', 'SWR', 'LOT', 'ICE', 'THY', 'AZA',
     // European Low-Cost
     'EZY', 'RYR', 'WZZ', 'VLG', 'EJU', 'TRA', 'TVS', 'NAX', 'BER',
     'VOE', 'TVF', 'EXS', 'JAF', 'BEE', 'NOZ',
     // Middle East
-    'QTR', 'UAE', 'ETD', 'ELY', 'MSR', 'ETH',
+    'QTR', 'UAE', 'ETD', 'ELY', 'MSR', 'ETH', 'SVA',
     // Asian
-    'JAL', 'ANA', 'KAL', 'AAR', 'CXA', 'HDA',
+    'JAL', 'ANA', 'KAL', 'AAR', 'CXA', 'HDA', 'SIA', 'CPA', 'EVA', 'CSN', 'CES', 'GIA',
     // Australian
     'QFA', 'VOZ', 'JST',
     // Mexican
     'AMX', 'AIJ', 'VIV', 'VOI',
+    // Latin American
+    'AVA', 'CMP', 'TAM',
     // Other International
     'AIC', 'APZ', 'AAY', 'DWI', 'BMA', 'MXY', 'FBU'
 ]);
