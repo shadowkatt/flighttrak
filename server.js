@@ -745,13 +745,20 @@ async function getFlightradar24FlightInfo(callsign, flight) {
             // Determine airline display name
             let airlineDisplay = flightData.operating_as || flightData.painted_as || null;
             
-            // Special handling for Republic Airways (RPA) - show operating airline
-            // RPA operates for American Airlines (AAL), Delta Air Lines (DAL), and United Airlines (UAL)
+            // Special handling for regional airlines operating for major carriers
+            // Republic Airways (RPA) operates for American Airlines (AAL), Delta Air Lines (DAL), and United Airlines (UAL)
+            // Endeavor Air (EDV) operates exclusively for Delta Air Lines (DAL)
             if (flightData.operating_as === 'RPA' && flightData.painted_as) {
                 const partnerAirlines = ['AAL', 'DAL', 'UAL'];
                 if (partnerAirlines.includes(flightData.painted_as)) {
                     airlineDisplay = `RPA (${flightData.painted_as})`;
                     console.log(`[Flightradar24] Republic Airways operating as ${flightData.painted_as} for ${callsign}`);
+                }
+            } else if (flightData.operating_as === 'EDV' && flightData.painted_as) {
+                const partnerAirlines = ['DAL'];
+                if (partnerAirlines.includes(flightData.painted_as)) {
+                    airlineDisplay = `EDV (${flightData.painted_as})`;
+                    console.log(`[Flightradar24] Endeavor Air operating as ${flightData.painted_as} for ${callsign}`);
                 }
             }
 
@@ -760,6 +767,9 @@ async function getFlightradar24FlightInfo(callsign, flight) {
                 destination: flightData.dest_icao || null,
                 aircraft_type: flightData.type || null,
                 airline: airlineDisplay,
+                airline_logo_code: (flightData.operating_as === 'RPA' || flightData.operating_as === 'EDV') && flightData.painted_as 
+                    ? flightData.painted_as // Use partner airline code for logo
+                    : null,
                 aircraft_registration: flightData.reg || null,
                 source: 'flightradar24'
             };

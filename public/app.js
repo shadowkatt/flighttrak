@@ -103,6 +103,9 @@ function processFlights(flights) {
                     if (route.airline) {
                         flight.airline = route.airline; // Store airline from API (e.g., "RPA (UAL)")
                     }
+                    if (route.airline_logo_code) {
+                        flight.airline_logo_code = route.airline_logo_code; // Store partner airline code for logo
+                    }
 
                     // Show popup and banner for all flights (server-side filtering handles private flights)
                     showFlightPopup(flight);
@@ -205,7 +208,10 @@ function renderGrid(flights) {
 
         const destText = flight.routeDestination ? getAirportName(flight.routeDestination) || flight.routeDestination : '---';
 
-        const logoUrl = getAirlineLogo(callsign);
+        // Use partner airline code for logo if available (e.g., RPA operating as UAL)
+        const logoCallsign = flight.airline_logo_code || callsign;
+        const logoUrl = getAirlineLogo(logoCallsign);
+        
         const category = aircraftCategories[flight.category] || '';
         
         // Use airline from API if available (e.g., "RPA (UAL)"), otherwise lookup by callsign
@@ -366,7 +372,11 @@ function createBannerCardHTML(flight) {
     const speedMph = Math.round(flight.velocity * 2.237);
     const vrFpm = Math.round((flight.vertical_rate || 0) * 196.85);
     const callsign = flight.callsign || flight.icao24;
-    const logoUrl = getAirlineLogo(callsign);
+    
+    // Use partner airline code for logo if available (e.g., RPA operating as UAL)
+    const logoCallsign = flight.airline_logo_code || callsign;
+    const logoUrl = getAirlineLogo(logoCallsign);
+    
     const airlineName = flight.airline || getAirlineName(callsign); // Use API airline if available
     const category = aircraftCategories[flight.category] || '';
 
