@@ -18,6 +18,7 @@ const airlines = {
     'LXJ': 'Flexjet',
     'JSX': 'JSX Air',
     'VJA': 'Vista America',
+    'TIV': 'Thrive',
     'EJA': 'NetJets',
     'GTI': 'Atlas Air',
     'UPS': 'UPS Airlines',

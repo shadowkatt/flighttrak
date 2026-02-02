@@ -235,7 +235,7 @@ const COMMERCIAL_AIRLINES = new Set([
     'RPA', 'JIA', 'EDV', 'SKW', 'ENY', 'CPZ', 'GJS', 'PDT',
     'HAL', 'SCX', 'QXE', 'ASH', 'AWI', 'UCA', 'DJT', 'VJA',
     // Private/Charter (with public flight info)
-    'EJA', 'LXJ', 'JSX',
+    'EJA', 'LXJ', 'JSX', 'TIV',
     // Cargo/Shipping
     'GTI', 'UPS', 'FDX', 'ABX', 'ATN', 'GEC',
     // Canadian
@@ -642,10 +642,20 @@ async function getFlightAwareFlightInfo(ident, flight) {
             // Log full response for debugging as requested
             console.log(`[FlightAware] Data for ${ident}:`, JSON.stringify(flight, null, 2));
 
+            // Determine airline display - FlightAware includes operator info
+            let airlineDisplay = flight.operator || flight.operator_icao || null;
+            
+            // Special handling for Republic Airways (RPA) - extract from ident if operating for another airline
+            if (ident.startsWith('RPA') && ident.length > 3) {
+                // RPA flights keep their callsign, can't determine operating airline from FlightAware data
+                airlineDisplay = null; // Will display as "Republic Airways" in UI
+            }
+
             const result = {
                 origin: flight.origin?.code_icao || null,
                 destination: flight.destination?.code_icao || null,
                 aircraft_type: flight.aircraft_type || null,
+                airline: airlineDisplay,
                 source: 'flightaware'
             };
 
@@ -732,11 +742,24 @@ async function getFlightradar24FlightInfo(callsign, flight) {
             // Log full response for debugging
             console.log(`[Flightradar24] Data for ${callsign}:`, JSON.stringify(flightData, null, 2));
 
+            // Determine airline display name
+            let airlineDisplay = flightData.operating_as || flightData.painted_as || null;
+            
+            // Special handling for Republic Airways (RPA) - show operating airline
+            // RPA operates for American Airlines (AAL), Delta Air Lines (DAL), and United Airlines (UAL)
+            if (flightData.operating_as === 'RPA' && flightData.painted_as) {
+                const partnerAirlines = ['AAL', 'DAL', 'UAL'];
+                if (partnerAirlines.includes(flightData.painted_as)) {
+                    airlineDisplay = `RPA (${flightData.painted_as})`;
+                    console.log(`[Flightradar24] Republic Airways operating as ${flightData.painted_as} for ${callsign}`);
+                }
+            }
+
             const result = {
                 origin: flightData.orig_icao || null,
                 destination: flightData.dest_icao || null,
                 aircraft_type: flightData.type || null,
-                airline: flightData.operating_as || flightData.painted_as || null,
+                airline: airlineDisplay,
                 aircraft_registration: flightData.reg || null,
                 source: 'flightradar24'
             };

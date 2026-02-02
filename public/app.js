@@ -100,6 +100,9 @@ function processFlights(flights) {
                     if (route.aircraft_type) {
                         flight.aircraft_type = route.aircraft_type;
                     }
+                    if (route.airline) {
+                        flight.airline = route.airline; // Store airline from API (e.g., "RPA (UAL)")
+                    }
 
                     // Show popup and banner for all flights (server-side filtering handles private flights)
                     showFlightPopup(flight);
@@ -204,6 +207,9 @@ function renderGrid(flights) {
 
         const logoUrl = getAirlineLogo(callsign);
         const category = aircraftCategories[flight.category] || '';
+        
+        // Use airline from API if available (e.g., "RPA (UAL)"), otherwise lookup by callsign
+        const airlineDisplay = flight.airline || getAirlineName(callsign);
 
         return `
             <div class="flight-card">
@@ -213,7 +219,7 @@ function renderGrid(flights) {
                             ${logoUrl ? `<img src="${logoUrl}" class="airline-logo-card" onerror="this.style.display='none'">` : ''}
                             ${displayCallsign}
                         </div>
-                        <div style="font-size:0.8rem; color:#888; margin-bottom:4px;">${getAirlineName(callsign)}</div>
+                        <div style="font-size:0.8rem; color:#888; margin-bottom:4px;">${airlineDisplay}</div>
                         <div class="origin">${originText} ➔ ${destText}</div>
                         ${category ? `<div class="origin" style="color:var(--accent-color); margin-top:2px;">${flight.aircraft_type || category}</div>` : ''}
                     </div>
@@ -361,7 +367,7 @@ function createBannerCardHTML(flight) {
     const vrFpm = Math.round((flight.vertical_rate || 0) * 196.85);
     const callsign = flight.callsign || flight.icao24;
     const logoUrl = getAirlineLogo(callsign);
-    const airlineName = getAirlineName(callsign);
+    const airlineName = flight.airline || getAirlineName(callsign); // Use API airline if available
     const category = aircraftCategories[flight.category] || '';
 
     // Convert heading to cardinal direction
@@ -484,7 +490,7 @@ function addToHistory(flight) {
         speed: speedMph,
         vr: vrFpm,
         logo: logoUrl,
-        airline: getAirlineName(callsign),
+        airline: flight.airline || getAirlineName(callsign), // Use API airline if available
         type: flight.aircraft_type || aircraftCategories[flight.category] || 'N/A'
     };
 
