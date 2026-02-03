@@ -54,6 +54,7 @@ const airlines = {
     'CSN': 'China Southern',
     'CES': 'China Eastern',
     'GIA': 'Garuda Indonesia',
+    'AIC': 'Air India',
     'WJA': 'WestJet',
     'ACA': 'Air Canada',
     'TSC': 'Air Transat',

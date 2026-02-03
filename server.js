@@ -255,7 +255,7 @@ const COMMERCIAL_AIRLINES = new Set([
     // Middle East
     'QTR', 'UAE', 'ETD', 'ELY', 'MSR', 'ETH', 'SVA',
     // Asian
-    'JAL', 'ANA', 'KAL', 'AAR', 'CXA', 'HDA', 'SIA', 'CPA', 'EVA', 'CSN', 'CES', 'GIA',
+    'JAL', 'ANA', 'KAL', 'AAR', 'CXA', 'HDA', 'SIA', 'CPA', 'EVA', 'CSN', 'CES', 'GIA', 'AIC',
     // Australian
     'QFA', 'VOZ', 'JST',
     // Mexican
