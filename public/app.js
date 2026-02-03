@@ -997,6 +997,59 @@ function loadTestData() {
 }
 
 // Check for test mode
+// CSV Export Functionality
+function exportHistoryToCSV() {
+    if (flightHistory.length === 0) {
+        alert('No flight history to export');
+        return;
+    }
+
+    // CSV Headers
+    const headers = ['Time', 'Airline', 'Callsign', 'Aircraft Type', 'Origin', 'Destination', 'Altitude (ft)', 'Speed (kts)', 'Vertical Rate (fpm)'];
+    
+    // Convert flight history to CSV rows
+    const rows = flightHistory.map(flight => {
+        return [
+            flight.timestamp || '',
+            flight.airline || '',
+            flight.callsign || '',
+            flight.aircraft_type || '',
+            flight.origin || '',
+            flight.destination || '',
+            flight.altitude || '',
+            flight.velocity || '',
+            flight.vertical_rate || ''
+        ];
+    });
+
+    // Combine headers and rows
+    const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+
+    // Create download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    // Generate filename with current date/time
+    const now = new Date();
+    const filename = `flighttrak_history_${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}.csv`;
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    console.log(`[Export] Exported ${flightHistory.length} flights to ${filename}`);
+}
+
+// Attach export button event listener
+document.getElementById('export-csv').addEventListener('click', exportHistoryToCSV);
+
 const urlParams = new URLSearchParams(window.location.search);
 const isTestMode = urlParams.get('test') === 'true';
 

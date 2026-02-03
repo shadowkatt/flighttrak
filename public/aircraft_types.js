@@ -102,6 +102,7 @@ const aircraftTypes = {
     // Business Jets / Corporate Aircraft
     'C68A': 'Cessna Citation Latitude',
     'CL35': 'Bombardier Challenger 350',
+    'CL60': 'Bombardier Challenger 600',
     'LJ35': 'Learjet 35',
     'C25A': 'Cessna Citation CJ2',
     'C25B': 'Cessna Citation CJ3',
@@ -116,6 +117,7 @@ const aircraftTypes = {
     'FA7X': 'Dassault Falcon 7X',
     'H25B': 'Hawker 800XP',
     'E55P': 'Embraer Phenom 300',
+    'E545': 'Embraer Legacy 450',
     'PC12': 'Pilatus PC-12',
     
     // Airbus A220 (formerly Bombardier CSeries)

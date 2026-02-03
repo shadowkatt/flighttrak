@@ -687,12 +687,50 @@ main {
   flex-direction: column;
 }
 
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
 .history-container h3 {
   font-size: 1rem;
   color: var(--text-secondary);
-  margin-bottom: 15px;
+  margin: 0;
   letter-spacing: 1px;
   flex-shrink: 0;
+}
+
+.export-btn {
+  background: transparent;
+  border: 1px solid #333;
+  color: var(--text-secondary);
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+}
+
+.export-btn:hover {
+  background: #1a1a1a;
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+  transform: translateY(-1px);
+}
+
+.export-btn:active {
+  transform: translateY(0);
+}
+
+.export-btn svg {
+  width: 16px;
+  height: 16px;
 }
 
 .flight-log-table {
