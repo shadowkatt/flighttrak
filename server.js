@@ -255,9 +255,9 @@ const COMMERCIAL_AIRLINES = new Set([
     // Middle East
     'QTR', 'UAE', 'ETD', 'ELY', 'MSR', 'ETH', 'SVA',
     // Asian
-    'JAL', 'ANA', 'KAL', 'AAR', 'CXA', 'HDA', 'SIA', 'CPA', 'EVA', 'CSN', 'CES', 'GIA', 'AIC',
-    // Australian
-    'QFA', 'VOZ', 'JST',
+    'JAL', 'ANA', 'KAL', 'AAR', 'CXA', 'HDA', 'SIA', 'CPA', 'EVA', 'CSN', 'CES', 'CCA', 'GIA', 'AIC',
+    // Australian/Oceania
+    'QFA', 'VOZ', 'JST', 'ANZ',
     // Mexican
     'AMX', 'AIJ', 'VIV', 'VOI',
     // Latin American
@@ -756,6 +756,7 @@ async function getFlightradar24FlightInfo(callsign, flight) {
             // Republic Airways (RPA) operates for American Airlines (AAL), Delta Air Lines (DAL), and United Airlines (UAL)
             // Endeavor Air (EDV) operates exclusively for Delta Air Lines (DAL)
             // GoJet Airlines (GJS) operates for United Airlines (UAL) and Delta Air Lines (DAL)
+            // Envoy Air (ENY) operates exclusively for American Airlines (AAL)
             if (flightData.operating_as === 'RPA' && flightData.painted_as) {
                 const partnerAirlines = ['AAL', 'DAL', 'UAL'];
                 if (partnerAirlines.includes(flightData.painted_as)) {
@@ -776,6 +777,13 @@ async function getFlightradar24FlightInfo(callsign, flight) {
                     airlineDisplay = `GoJet (${flightData.painted_as})`;
                     airlineLogoCode = flightData.painted_as; // Use partner logo
                     console.log(`[Flightradar24] GoJet operating as ${flightData.painted_as} for ${callsign}`);
+                }
+            } else if (flightData.operating_as === 'ENY' && flightData.painted_as) {
+                const partnerAirlines = ['AAL'];
+                if (partnerAirlines.includes(flightData.painted_as)) {
+                    airlineDisplay = `Envoy Air (${flightData.painted_as})`;
+                    airlineLogoCode = flightData.painted_as; // Use partner logo
+                    console.log(`[Flightradar24] Envoy Air operating as ${flightData.painted_as} for ${callsign}`);
                 }
             }
 
