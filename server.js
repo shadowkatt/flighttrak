@@ -416,11 +416,15 @@ function recordFlightradar24Call() {
     flightradar24CallQueue.push(Date.now());
 }
 
-// Update cost every 10 minutes
+// Update cost every 30 minutes
 async function updateCostData() {
-    const faCost = await getFlightAwareCost();
-    apiCosts.flightaware = faCost.cost;
-    apiCosts.flightaware_calls = faCost.calls;
+    // Only check FlightAware usage if it's the active provider (avoid unnecessary API charges)
+    if (ACTIVE_ENHANCED_PROVIDER === 'flightaware') {
+        const faCost = await getFlightAwareCost();
+        apiCosts.flightaware = faCost.cost;
+        apiCosts.flightaware_calls = faCost.calls;
+        console.log(`[System] FlightAware cost updated: $${apiCosts.flightaware.toFixed(4)} (${apiCosts.flightaware_calls} calls)`);
+    }
     
     // Try to get FR24 credits from API (checked every 10 minutes like FlightAware)
     const fr24Credits = await getFlightradar24Credits();
