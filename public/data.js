@@ -56,6 +56,7 @@ const airlines = {
     'GIA': 'Garuda Indonesia',
     'WJA': 'WestJet',
     'ACA': 'Air Canada',
+    'TSC': 'Air Transat',
     'VOI': 'Volaris',
     'AMX': 'Aeroméxico',
     'AVA': 'Avianca',
