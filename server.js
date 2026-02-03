@@ -49,23 +49,29 @@ let authToken = {
 
 // Calculate next billing reset date (FlightAware & FR24 reset on 1st of each month)
 function getNextMonthlyResetDate() {
-    // Use .env CREDITS_RESET if provided, otherwise calculate next 1st of month
-    if (process.env.CREDITS_RESET) {
-        return new Date(process.env.CREDITS_RESET).toISOString();
-    }
-    
     const now = new Date();
-    const currentDay = now.getDate();
     
-    // If we're on or after the 1st, next reset is 1st of next month
-    // Otherwise, next reset is 1st of this month
-    let resetDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    
-    if (currentDay >= 1) {
-        // Move to 1st of next month
-        resetDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    // If CREDITS_RESET is set in .env, use that day of the month
+    if (process.env.CREDITS_RESET) {
+        const envResetDate = new Date(process.env.CREDITS_RESET);
+        if (!isNaN(envResetDate.getTime())) {
+            const resetDay = envResetDate.getDate(); // Get the day (e.g., 1 for March 1st)
+            
+            // Start with this month at the reset day
+            let resetDate = new Date(now.getFullYear(), now.getMonth(), resetDay);
+            
+            // If that date has already passed, move to next month
+            if (resetDate <= now) {
+                resetDate = new Date(now.getFullYear(), now.getMonth() + 1, resetDay);
+            }
+            
+            console.log(`[Usage Tracking] Monthly reset on day ${resetDay} of each month. Next reset: ${resetDate.toISOString()}`);
+            return resetDate.toISOString();
+        }
     }
     
+    // Default: Calculate 1st of next month
+    const resetDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     return resetDate.toISOString();
 }
 
