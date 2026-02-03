@@ -14,6 +14,7 @@ const aircraftTypes = {
     'B762': 'Boeing 767-200',
     'B752': 'Boeing 757-200',
     'B753': 'Boeing 757-300',
+    'B712': 'Boeing 717-200',
     'B732': 'Boeing 737-200',
     'B733': 'Boeing 737-300',
     'B734': 'Boeing 737-400',
