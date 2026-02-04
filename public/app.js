@@ -36,8 +36,12 @@ function getAirlineLogo(callsign) {
     if (!callsign || callsign.length < 3) return '';
     // Assume first 3 chars are ICAO airline code (e.g., UAL from UAL123)
     const airlineCode = callsign.substring(0, 3).toUpperCase();
-    // Using radarbox_logos for better logo quality
-    return `https://raw.githubusercontent.com/Jxck-S/airline-logos/main/radarbox_logos/${airlineCode}.png`;
+    
+    // Special cases: Use flightaware_logos for better quality on specific airlines
+    const useFlightAwareLogos = ['ASA']; // Alaska Airlines
+    const logoFolder = useFlightAwareLogos.includes(airlineCode) ? 'flightaware_logos' : 'radarbox_logos';
+    
+    return `https://raw.githubusercontent.com/Jxck-S/airline-logos/main/${logoFolder}/${airlineCode}.png`;
 }
 
 async function fetchFlights() {
