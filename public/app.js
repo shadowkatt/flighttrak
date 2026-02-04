@@ -38,7 +38,7 @@ function getAirlineLogo(callsign) {
     const airlineCode = callsign.substring(0, 3).toUpperCase();
     
     // Special cases: Use flightaware_logos for better quality on specific airlines
-    const useFlightAwareLogos = ['ASA']; // Alaska Airlines
+    const useFlightAwareLogos = ['ASA', 'EJA']; // Alaska Airlines, NetJets
     const logoFolder = useFlightAwareLogos.includes(airlineCode) ? 'flightaware_logos' : 'radarbox_logos';
     
     return `https://raw.githubusercontent.com/Jxck-S/airline-logos/main/${logoFolder}/${airlineCode}.png`;
