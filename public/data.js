@@ -54,6 +54,7 @@ const airlines = {
     'CPA': 'Cathay Pacific',
     'EVA': 'EVA Air',
     'KAL': 'Korean Air',
+    'APZ': 'Air Premia',
     'CSN': 'China Southern',
     'CES': 'China Eastern',
     'CCA': 'Air China',
