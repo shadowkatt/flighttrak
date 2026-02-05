@@ -641,17 +641,32 @@ async function fetchCost() {
             document.getElementById('os-calls').textContent = `${osCreditsUsed}/${osDailyLimit}`;
         }
 
-        // Show ONLY the active provider's stats
+        // Show active provider's stats + FlightAware (always shown as fallback)
         const faStats = document.getElementById('fa-stats');
         const fr24Stats = document.getElementById('fr24-stats');
         
-        if (activeProvider === 'flightaware' && availableProviders.flightaware) {
+        // Always show FlightAware stats (it's used as fallback even when not active)
+        if (availableProviders.flightaware) {
             faStats.style.display = '';
-            fr24Stats.style.display = 'none';
             document.getElementById('fa-calls').textContent = data.flightaware_calls || 0;
-            document.getElementById('fa-cost').textContent = data.flightaware || '0.00';
-        } else if (activeProvider === 'flightradar24' && availableProviders.flightradar24) {
+            const faCost = data.flightaware || '0.00';
+            const faCostCap = data.flightaware_cost_cap || 25.00;
+            const faCostCapReached = data.flightaware_cost_cap_reached || false;
+            
+            // Show cost with cap indicator
+            let costDisplay = faCost;
+            if (faCostCapReached) {
+                costDisplay += ` <span style="color: #ff4444; font-weight: bold;" title="Cost cap reached ($${faCostCap}). FlightAware disabled.">⚠ CAP</span>`;
+            } else {
+                costDisplay += ` <span style="color: #888; font-size: 0.9em;">/ $${faCostCap}</span>`;
+            }
+            document.getElementById('fa-cost').innerHTML = costDisplay;
+        } else {
             faStats.style.display = 'none';
+        }
+        
+        // Show FR24 stats if it's the active provider
+        if (activeProvider === 'flightradar24' && availableProviders.flightradar24) {
             fr24Stats.style.display = '';
             document.getElementById('fr24-calls').textContent = data.flightradar24_calls || 0;
             const creditsUsed = data.flightradar24_credits_used || 0;
@@ -659,15 +674,22 @@ async function fetchCost() {
             const totalCredits = creditsUsed + creditsRemaining;
             document.getElementById('fr24-credits').textContent = `${creditsUsed}/${totalCredits}`;
         } else {
-            // No enhanced provider active
-            faStats.style.display = 'none';
             fr24Stats.style.display = 'none';
         }
 
         // Update reset dates
         if (data.monthly_reset_date) {
             const monthlyResetDate = new Date(data.monthly_reset_date);
-            document.getElementById('reset-date').textContent = `Credits Reset: ${monthlyResetDate.toLocaleDateString()}`;
+            const resetDateElem = document.getElementById('reset-date');
+            resetDateElem.textContent = `Credits Reset: ${monthlyResetDate.toLocaleDateString()}`;
+            
+            // Add cache mode indicator if credits exhausted
+            if (data.cache_mode) {
+                const warning = ' <span style="color: #ffa500; font-weight: bold;" ' +
+                    'title="API credits exhausted. Using cached data. Fresh flights show position only.">' +
+                    '⚠ CACHE MODE (' + data.cache_entries + ' flights)</span>';
+                resetDateElem.innerHTML = resetDateElem.textContent + warning;
+            }
         }
     } catch (error) {
         console.error('Error fetching cost:', error);

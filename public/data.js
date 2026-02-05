@@ -28,6 +28,7 @@ const airlines = {
     'GTI': 'Atlas Air',
     'UPS': 'UPS Airlines',
     'FDX': 'FedEx Express',
+    'ABX': 'ABX Air',
     'BAW': 'British Airways',
     'VIR': 'Virgin Atlantic',
     'AFR': 'Air France',

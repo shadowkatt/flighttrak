@@ -4,6 +4,7 @@
 # Cost tracking data (contains usage information)
 cost_tracking.json
 usage-tracking.json
+flight-cache.json
 
 # Node modules
 node_modules/
