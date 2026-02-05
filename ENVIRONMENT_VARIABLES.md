@@ -87,12 +87,8 @@ This document provides a comprehensive guide to all environment variables used i
 
 ## Provider Selection
 
-### `ENHANCED_API_PROVIDER`
-**Purpose**: Which enhanced API to use as primary provider
-**Type**: String
-**Default**: `flightradar24`
-**Options**: `flightaware` or `flightradar24`
-**Notes**: Only ONE will be active at a time (can be changed in UI)
+### Provider Selection (UI-based)
+**Note**: The active provider is selected through the UI and stored in `usage-tracking.json`, not via environment variable. The system defaults to `flightradar24` on first run. You can switch providers using the UI dropdown.
 
 ### `HYBRID_MODE`
 **Purpose**: Enable automatic switching between providers when costs get high
@@ -115,6 +111,32 @@ This document provides a comprehensive guide to all environment variables used i
 - Only commercial airline flights sent to FA/FR24 APIs
 - Saves API credits
 - OpenSky data is always fetched for all flights
+
+## Advanced/Debug Settings
+
+### `PORT`
+**Purpose**: Server port number
+**Type**: Number
+**Default**: `3000`
+**Notes**: Usually don't need to change this
+
+### `CREDITS_RESET`
+**Purpose**: Manual credit reset date override
+**Type**: Date string (ISO format)
+**Example**: `CREDITS_RESET=2026-03-01`
+**Notes**: Advanced feature - usually handled automatically
+
+### `USE_ADSB`
+**Purpose**: Enable ADSBexchange as flight data source (debug mode)
+**Type**: String
+**Default**: `false`
+**Options**: `true` or `false`
+**Notes**: Requires RAPIDAPI_KEY. Used for debugging during OpenSky outages.
+
+### `RAPIDAPI_KEY`
+**Purpose**: RapidAPI key for ADSBexchange access
+**Type**: String
+**Notes**: Only needed if USE_ADSB is enabled
 
 ## OpenSky Credentials (Choose ONE method)
 
