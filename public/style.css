@@ -694,6 +694,35 @@ main {
   margin-bottom: 15px;
 }
 
+.history-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.search-box {
+  background: #0a0a0a;
+  border: 1px solid #333;
+  color: var(--text-primary);
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 0.85rem;
+  width: 200px;
+  height: 32px;
+  transition: all 0.2s;
+}
+
+.search-box:focus {
+  outline: none;
+  border-color: var(--accent-color);
+  background: #111;
+}
+
+.search-box::placeholder {
+  color: #555;
+}
+
 .history-container h3 {
   font-size: 1rem;
   color: var(--text-secondary);

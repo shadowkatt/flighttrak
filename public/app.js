@@ -18,7 +18,8 @@ let bannerFlightIds = new Set(); // Track which flights have been added to banne
 const MAX_BANNER_CARDS = 5; // Maximum banner cards to show (reduced for larger display)
 let flightHistory = []; // Store list of recent unique flights
 const MAX_HISTORY = 500; // Hold up to a full day of traffic (adjustable based on traffic volume)
-let historyFlightIds = new Set(); // Track which flights have been added to history
+let historyFlightIds = new Map(); // Track flight timestamps for time-based deduplication (icao24 -> timestamp)
+const HISTORY_DEDUP_WINDOW_MS = 6 * 60 * 60 * 1000; // 6 hours - allow same flight to appear again after this window
 let ALTITUDE_THRESHOLD_FEET = null; // Loaded from server config (.env), no hardcoded default
 let availableProviders = {}; // Track which API providers are available
 let activeProvider = 'flightradar24'; // Current active enhanced provider (only ONE at a time)
@@ -536,8 +537,21 @@ function updateBannerCard(cardElement, flight) {
 }
 
 function addToHistory(flight) {
-    // Skip if already in history
-    if (historyFlightIds.has(flight.icao24)) return;
+    const now = Date.now();
+    
+    // Check if this flight was seen recently (within 6-hour window)
+    if (historyFlightIds.has(flight.icao24)) {
+        const lastSeen = historyFlightIds.get(flight.icao24);
+        const timeSinceLastSeen = now - lastSeen;
+        
+        if (timeSinceLastSeen < HISTORY_DEDUP_WINDOW_MS) {
+            // Still within dedup window, skip
+            return;
+        } else {
+            // Outside window, allow re-add
+            console.log(`[History] ${flight.callsign || flight.icao24} last seen ${Math.round(timeSinceLastSeen / 1000 / 60 / 60)}h ago, adding again`);
+        }
+    }
 
     const altFt = Math.round(flight.altitude * 3.28084);
     const speedMph = Math.round(flight.velocity * 2.237);
@@ -559,6 +573,8 @@ function addToHistory(flight) {
 
     const logEntry = {
         time: flight.time_position ? new Date(flight.time_position * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : new Date().toLocaleTimeString(),
+        timestamp: now,
+        icao24: flight.icao24,
         callsign: callsign,
         displayCallsign: callsign && callsign.length > 2 ? callsign : `<span style="opacity:0.5; font-size:0.9em">Hex: ${flight.icao24}</span>`,
         origin: origin,
@@ -571,8 +587,8 @@ function addToHistory(flight) {
         type: flight.aircraft_type || aircraftCategories[flight.category] || 'N/A'
     };
 
-    // Track this flight as added to history
-    historyFlightIds.add(flight.icao24);
+    // Track this flight's timestamp
+    historyFlightIds.set(flight.icao24, now);
 
     // Add to front
     flightHistory.unshift(logEntry);
@@ -580,15 +596,55 @@ function addToHistory(flight) {
     // Trim
     if (flightHistory.length > MAX_HISTORY) {
         const removed = flightHistory.pop();
-        // Also remove from tracking set so it can be re-added if it comes back
+        // Remove from tracking map (will be re-added if flight comes back)
         historyFlightIds.delete(removed.icao24);
     }
 
     renderHistory();
 }
 
+// Cleanup stale entries from historyFlightIds Map (run periodically)
+function cleanupHistoryTimestamps() {
+    const now = Date.now();
+    let removed = 0;
+    
+    for (const [icao24, timestamp] of historyFlightIds.entries()) {
+        if (now - timestamp > HISTORY_DEDUP_WINDOW_MS) {
+            historyFlightIds.delete(icao24);
+            removed++;
+        }
+    }
+    
+    if (removed > 0) {
+        console.log(`[History Cleanup] Removed ${removed} stale timestamp entries from deduplication map`);
+    }
+}
+
+// Filter history based on search query
+let historySearchQuery = '';
+
+function filterHistory(query) {
+    historySearchQuery = query.toLowerCase().trim();
+    renderHistory();
+}
+
 function renderHistory() {
-    historyLogBody.innerHTML = flightHistory.map(entry => `
+    // Filter flights based on search query
+    const filteredHistory = historySearchQuery 
+        ? flightHistory.filter(entry => {
+            const searchFields = [
+                entry.callsign || '',
+                entry.airline || '',
+                entry.origin || '',
+                entry.dest || '',
+                entry.type || ''
+            ].join(' ').toLowerCase();
+            
+            return searchFields.includes(historySearchQuery);
+        })
+        : flightHistory;
+    
+    historyLogBody.innerHTML = filteredHistory.map(entry => `
         <tr>
             <td data-label="TIME">${entry.time}</td>
             <td data-label="AIRLINE" style="color:#aaa;">${entry.airline || '-'}</td>
@@ -1101,6 +1157,11 @@ function exportHistoryToCSV() {
 // Attach export button event listener
 document.getElementById('export-csv').addEventListener('click', exportHistoryToCSV);
 
+// Attach search box event listener
+document.getElementById('history-search').addEventListener('input', (e) => {
+    filterHistory(e.target.value);
+});
+
 const urlParams = new URLSearchParams(window.location.search);
 const isTestMode = urlParams.get('test') === 'true';
 
@@ -1119,4 +1180,7 @@ if (isTestMode) {
     
     // Poll config every 30 seconds to detect server-side provider changes (e.g., hybrid mode auto-switch)
     setInterval(fetchConfig, 30000);
+    
+    // Cleanup stale history timestamps every hour
+    setInterval(cleanupHistoryTimestamps, 60 * 60 * 1000);
 }
