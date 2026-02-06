@@ -19,9 +19,10 @@ const MAX_BANNER_CARDS = 5; // Maximum banner cards to show (reduced for larger 
 let flightHistory = []; // Store list of recent unique flights
 const MAX_HISTORY = 500; // Hold up to a full day of traffic (adjustable based on traffic volume)
 let historyFlightIds = new Set(); // Track which flights have been added to history
-let ALTITUDE_THRESHOLD_FEET = 5000; // Default, will be loaded from config
+let ALTITUDE_THRESHOLD_FEET = null; // Loaded from server config (.env), no hardcoded default
 let availableProviders = {}; // Track which API providers are available
 let activeProvider = 'flightradar24'; // Current active enhanced provider (only ONE at a time)
+let configLoaded = false; // Track if config has been loaded from server
 
 
 
@@ -75,10 +76,17 @@ function processFlights(flights) {
         if (!activeFlights.has(flight.icao24)) {
             // It's a new flight!
             
-            // Filter: Only log flights above altitude threshold
+            // Wait for config to load before applying altitude filter
+            if (!configLoaded || ALTITUDE_THRESHOLD_FEET === null) {
+                console.log(`[Filter] Config not loaded yet, tracking ${flight.callsign || flight.icao24} without filtering`);
+                activeFlights.set(flight.icao24, flight);
+                return; // Skip processing until config loads
+            }
+            
+            // Filter: Only log flights above altitude threshold (from .env)
             const altitudeFeet = flight.altitude * 3.28084; // Convert meters to feet
             if (altitudeFeet < ALTITUDE_THRESHOLD_FEET) {
-                console.log(`[Filter] Skipping ${flight.callsign || flight.icao24} - ${Math.round(altitudeFeet)} ft (below ${ALTITUDE_THRESHOLD_FEET} ft)`);
+                console.log(`[Filter] Skipping ${flight.callsign || flight.icao24} - ${Math.round(altitudeFeet)} ft (below ${ALTITUDE_THRESHOLD_FEET} ft from .env)`);
                 // Still track it, but don't show popup/banner/history
                 activeFlights.set(flight.icao24, flight);
                 return; // Skip to next flight
@@ -722,8 +730,11 @@ async function fetchConfig() {
         // Store hybrid mode status
         const hybridMode = config.hybridMode || false;
 
-        // Update altitude threshold based on active provider
+        // Update altitude threshold based on active provider (from .env only)
         updateAltitudeDisplay(config);
+        
+        // Mark config as loaded
+        configLoaded = true;
 
         // Update location display
         if (config.zip) {
@@ -758,10 +769,18 @@ async function fetchConfig() {
         
         // Only set up fallback polling if not already initialized
         if (!isInitialized) {
-            console.log('[Init] Fallback initialization due to config error');
+            console.error('[Init] Fallback initialization due to config error - using defaults from server');
             isInitialized = true;
-            fetchFlights();
-            flightPollingInterval = setInterval(fetchFlights, 10000);
+            
+            // DO NOT set defaults here - altitude must come from .env only
+            // Log error and skip flight processing until config succeeds
+            console.error('[Config Error] Cannot process flights without .env altitude values');
+            
+            // Retry config fetch after 5 seconds
+            setTimeout(() => {
+                console.log('[Config] Retrying config fetch...');
+                fetchConfig();
+            }, 5000);
         }
     }
 }
@@ -769,11 +788,17 @@ async function fetchConfig() {
 // Update altitude display based on active provider
 function updateAltitudeDisplay(config) {
     if (activeProvider === 'flightaware') {
-        ALTITUDE_THRESHOLD_FEET = config.flightawareLookupAltitudeFeet || 2000;
+        ALTITUDE_THRESHOLD_FEET = config.flightawareLookupAltitudeFeet;
     } else if (activeProvider === 'flightradar24') {
-        ALTITUDE_THRESHOLD_FEET = config.flightradar24LookupAltitudeFeet || 2000;
+        ALTITUDE_THRESHOLD_FEET = config.flightradar24LookupAltitudeFeet;
     }
-    console.log(`[Config] Altitude threshold set to ${ALTITUDE_THRESHOLD_FEET} ft (${activeProvider})`);
+    
+    if (ALTITUDE_THRESHOLD_FEET === undefined || ALTITUDE_THRESHOLD_FEET === null) {
+        console.error(`[Config Error] Altitude threshold not provided by server for ${activeProvider}`);
+        return;
+    }
+    
+    console.log(`[Config] Altitude threshold set to ${ALTITUDE_THRESHOLD_FEET} ft from .env (${activeProvider})`);
     document.getElementById('altitude-filter').textContent = `${ALTITUDE_THRESHOLD_FEET} FT`;
 }
 
