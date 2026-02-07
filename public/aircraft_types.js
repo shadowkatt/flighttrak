@@ -99,6 +99,7 @@ const aircraftTypes = {
     'E75L': 'Embraer 175 (Long Range)',
     'E75S': 'Embraer 175 (Short Range)',
     'E145': 'Embraer ERJ-145',
+    'E45X': 'Embraer ERJ-145XR',
     
     // Business Jets / Corporate Aircraft
     'C68A': 'Cessna Citation Latitude',
