@@ -40,7 +40,7 @@ function getAirlineLogo(callsign) {
     const airlineCode = callsign.substring(0, 3).toUpperCase();
     
     // Special cases: Use flightaware_logos for better quality on specific airlines
-    const useFlightAwareLogos = ['ASA', 'EJA']; // Alaska Airlines, NetJets
+    const useFlightAwareLogos = ['ASA', 'EJA', 'APZ']; // Alaska Airlines, NetJets, Air Premia
     const logoFolder = useFlightAwareLogos.includes(airlineCode) ? 'flightaware_logos' : 'radarbox_logos';
     
     return `https://raw.githubusercontent.com/Jxck-S/airline-logos/main/${logoFolder}/${airlineCode}.png`;
@@ -119,8 +119,8 @@ function processFlights(flights) {
                     if (route.airline_logo_code) {
                         flight.airline_logo_code = route.airline_logo_code; // Store partner airline code for logo
                     }
-                    if (route.eta) {
-                        flight.eta = route.eta; // Store estimated arrival time
+                    if (route.departure_time) {
+                        flight.departure_time = route.departure_time; // Store departure time
                     }
 
                     // Show popup and banner for all flights (server-side filtering handles private flights)
@@ -230,8 +230,8 @@ function renderGrid(flights) {
         
         const category = aircraftCategories[flight.category] || '';
         
-        // Use API airline if available (e.g., "RPA (UAL)"), otherwise lookup full name
-        const airlineDisplay = flight.airline || getAirlineName(callsign);
+        // Use API airline if available, otherwise lookup from airline_logo_code (painted_as), then fallback to callsign
+        const airlineDisplay = flight.airline || (flight.airline_logo_code ? getAirlineName(flight.airline_logo_code) : getAirlineName(callsign));
 
         return `
             <div class="flight-card">
@@ -393,8 +393,8 @@ function createBannerCardHTML(flight) {
     const logoCallsign = flight.airline_logo_code || callsign;
     const logoUrl = getAirlineLogo(logoCallsign);
     
-    // Use API airline if available (e.g., "RPA (UAL)"), otherwise lookup full name
-    const airlineName = flight.airline || getAirlineName(callsign);
+    // Use API airline if available, otherwise lookup from airline_logo_code (painted_as), then fallback to callsign
+    const airlineName = flight.airline || (flight.airline_logo_code ? getAirlineName(flight.airline_logo_code) : getAirlineName(callsign));
     const category = aircraftCategories[flight.category] || '';
 
     // Convert heading to cardinal direction
@@ -418,18 +418,21 @@ function createBannerCardHTML(flight) {
     const originCity = origin.includes('(') ? origin.replace(/\s*\([^)]*\)/, '') : origin;
     const destCity = dest.includes('(') ? dest.replace(/\s*\([^)]*\)/, '') : dest;
 
-    // Format ETA if available
-    let etaDisplay = '';
-    if (flight.eta) {
+    // Format departure time if available
+    let departureDisplay = '';
+    if (flight.departure_time) {
         try {
-            const etaDate = new Date(flight.eta);
-            const hours = etaDate.getHours();
-            const minutes = etaDate.getMinutes().toString().padStart(2, '0');
+            const departureDate = new Date(flight.departure_time);
+            const hours = departureDate.getHours();
+            const minutes = departureDate.getMinutes().toString().padStart(2, '0');
             const ampm = hours >= 12 ? 'PM' : 'AM';
             const displayHours = hours % 12 || 12;
-            etaDisplay = `ETA ${displayHours}:${minutes} ${ampm}`;
+            
+            // Get timezone abbreviation (EST, PST, etc.)
+            const timezone = departureDate.toLocaleTimeString('en-US', { timeZoneName: 'short' }).split(' ').pop();
+            departureDisplay = `Departure: ${displayHours}:${minutes} ${ampm} ${timezone}`;
         } catch (e) {
-            // Invalid date, skip ETA display
+            // Invalid date, skip departure display
         }
     }
 
@@ -452,7 +455,7 @@ function createBannerCardHTML(flight) {
                 <div class="banner-callsign">${callsign}</div>
                 ${airlineName ? `<div class="banner-airline">${airlineName}</div>` : ''}
             </div>
-            <div class="banner-route">${originCity} → ${destCity}${etaDisplay ? ` <span class="eta-inline">(${etaDisplay})</span>` : ''}</div>
+            <div class="banner-route">${originCity} → ${destCity}${departureDisplay ? ` <span class="eta-inline">(${departureDisplay})</span>` : ''}</div>
             <div class="banner-type ${isUnknown ? 'clickable-aircraft-type' : ''}" 
                  data-code="${rawType}" 
                  title="${isUnknown ? 'Click to identify this aircraft type' : aircraftInfo}">
@@ -481,22 +484,25 @@ function updateBannerCard(cardElement, flight) {
     // Vertical rate indicator
     const vrIndicator = vrFpm > 500 ? '↗' : vrFpm < -500 ? '↘' : '→';
     
-    // Format ETA if available
-    let etaDisplay = '';
-    if (flight.eta) {
+    // Format departure time if available
+    let departureDisplay = '';
+    if (flight.departure_time) {
         try {
-            const etaDate = new Date(flight.eta);
-            const hours = etaDate.getHours();
-            const minutes = etaDate.getMinutes().toString().padStart(2, '0');
+            const departureDate = new Date(flight.departure_time);
+            const hours = departureDate.getHours();
+            const minutes = departureDate.getMinutes().toString().padStart(2, '0');
             const ampm = hours >= 12 ? 'PM' : 'AM';
             const displayHours = hours % 12 || 12;
-            etaDisplay = `ETA ${displayHours}:${minutes} ${ampm}`;
+            
+            // Get timezone abbreviation (EST, PST, etc.)
+            const timezone = departureDate.toLocaleTimeString('en-US', { timeZoneName: 'short' }).split(' ').pop();
+            departureDisplay = `Departure: ${displayHours}:${minutes} ${ampm} ${timezone}`;
         } catch (e) {
-            // Invalid date, skip ETA display
+            // Invalid date, skip departure display
         }
     }
     
-    // Update route with ETA
+    // Update route with departure time
     const safeGetAirportName = (code) => {
         if (typeof getAirportName === 'function') {
             return getAirportName(code);
@@ -511,7 +517,7 @@ function updateBannerCard(cardElement, flight) {
     
     const routeElement = cardElement.querySelector('.banner-route');
     if (routeElement) {
-        const newRouteHTML = `${originCity} → ${destCity}${etaDisplay ? ` <span class="eta-inline">(${etaDisplay})</span>` : ''}`;
+        const newRouteHTML = `${originCity} → ${destCity}${departureDisplay ? ` <span class="eta-inline">(${departureDisplay})</span>` : ''}`;
         if (routeElement.innerHTML !== newRouteHTML) {
             routeElement.innerHTML = newRouteHTML;
         }

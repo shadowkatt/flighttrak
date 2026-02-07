@@ -333,7 +333,7 @@ async function cacheFlightData(callsign, flightData) {
         source: flightData.source,
         cached_at: cachedAt.toISOString(),
         expires_at: expiresAt.toISOString()
-        // Note: eta excluded from cache
+        // Note: departure_time excluded from cache (would be stale)
     };
     
     cacheNeedsSave = true;
@@ -557,9 +557,11 @@ const FR24_RATE_WINDOW = 60000; // 1 minute in ms
 
 // FR24 Credit costs per endpoint (from API documentation)
 const FR24_CREDIT_COSTS = {
+    'flight-summary/light': 2,       // Per callsign with datetime window - PRIMARY ENDPOINT
+    'flight-summary/full': 2,        // Per callsign with datetime window
     'live/flight-positions/full': {
-        'area': 936,      // Area search with bounds parameter
-        'callsign': 8     // Single callsign query
+        'area': 936,      // Area search with bounds parameter (AVOID - expensive)
+        'callsign': 8     // Single callsign query (OLD METHOD - replaced by flight-summary)
     },
     'live/flight-positions/light': 468,
     'usage': 0 // Usage endpoint doesn't consume credits
@@ -730,7 +732,7 @@ async function getFlightAwareFlightInfo(ident, flight) {
         if (cachedData) {
             return { 
                 ...cachedData, 
-                eta: null,  // Don't show stale ETA
+                departure_time: null,  // Don't show stale departure time
                 from_cache: true 
             };
         }
@@ -839,13 +841,22 @@ async function getFlightAwareFlightInfo(ident, flight) {
                 airline: airlineDisplay, // Always null - client will lookup full name
                 airline_logo_code: airlineLogoCode, // Always null - use callsign for logo
                 aircraft_registration: null, // FlightAware doesn't provide this easily
-                eta: flight.estimated_on || flight.scheduled_on || null, // Estimated or scheduled arrival
+                departure_time: flight.actual_off || null, // Use actual_off for departure time
                 source: 'flightaware'
             };
 
-            // Save to BOTH caches
-            saveRecentLookup(ident, result);           // Tier 1: Recent (5 min)
-            await cacheFlightData(ident, result);      // Tier 2: Persistent (7 days)
+            // Save to BOTH caches (without departure_time - cache is for route info only)
+            const cacheResult = {
+                origin: result.origin,
+                destination: result.destination,
+                aircraft_type: result.aircraft_type,
+                airline: result.airline,
+                airline_logo_code: result.airline_logo_code,
+                aircraft_registration: result.aircraft_registration,
+                source: result.source
+            };
+            saveRecentLookup(ident, cacheResult);           // Tier 1: Recent (5 min)
+            await cacheFlightData(ident, cacheResult);      // Tier 2: Persistent (7 days)
 
             return { ...result, from_cache: false };
         }
@@ -875,7 +886,7 @@ async function getFlightradar24FlightInfo(callsign, flight) {
         if (cachedData) {
             return { 
                 ...cachedData, 
-                eta: null,  // Explicitly null - don't show stale ETA
+                departure_time: null,  // Explicitly null - don't show stale departure time
                 from_cache: true 
             };
         }
@@ -898,10 +909,16 @@ async function getFlightradar24FlightInfo(callsign, flight) {
         recordFlightradar24Call();
         const startTime = Date.now();
         
-        // Using live/flight-positions/full with single callsign filter
-        // Per FR24 docs: Single callsign = 8 credits, Area search (bounds) = 936 credits
-        const url = `${FLIGHTRADAR24_BASE_URL}/live/flight-positions/full`;
-        console.log(`[Flightradar24] Requesting flight position (single callsign, 8 credits): ${url}?callsigns=${callsign}`);
+        // Using flight-summary/light with callsign and datetime window
+        // Per FR24 docs: flight-summary/light = 2 credits (vs 8 for live/flight-positions/full)
+        // Requires datetime window - using 8 hour window to catch recent flights
+        const now = new Date();
+        const from = new Date(now.getTime() - (8 * 60 * 60 * 1000)); // 8 hours ago
+        const fromStr = from.toISOString().replace(/\.\d{3}Z$/, 'Z');
+        const toStr = now.toISOString().replace(/\.\d{3}Z$/, 'Z');
+        
+        const url = `${FLIGHTRADAR24_BASE_URL}/flight-summary/light`;
+        console.log(`[Flightradar24] Requesting flight summary (2 credits): ${url}?callsigns=${callsign}&flight_datetime_from=${fromStr}`);
         
         const response = await axios.get(url, {
             headers: {
@@ -910,30 +927,33 @@ async function getFlightradar24FlightInfo(callsign, flight) {
                 'accept-version': 'v1'
             },
             params: {
-                callsigns: callsign
+                callsigns: callsign,
+                flight_datetime_from: fromStr,
+                flight_datetime_to: toStr,
+                limit: 500
             }
         });
         
         const duration = Date.now() - startTime;
-        logAPI('Flightradar24', 'GET', `/live/flight-positions/full?callsigns=${callsign}`, response.status, duration);
+        logAPI('Flightradar24', 'GET', `/flight-summary/light?callsigns=${callsign}`, response.status, duration);
 
         // Track API call count and estimate credits
-        // Single callsign lookup = 8 credits (per FR24 docs)
+        // flight-summary/light = 2 credits (75% savings vs 8 credits)
         // This local tracking helps between /usage API syncs (every 30 min)
         apiCosts.flightradar24_calls++;
-        apiCosts.flightradar24_credits_used += 8;
+        apiCosts.flightradar24_credits_used += 2;
         apiCosts.flightradar24_credits_remaining = Math.max(0, 30000 - apiCosts.flightradar24_credits_used);
         
-        console.log(`[FR24] Local tracking: +8 credits, total: ${apiCosts.flightradar24_credits_used}/30000, remaining: ${apiCosts.flightradar24_credits_remaining}`);
+        console.log(`[FR24] Local tracking: +2 credits, total: ${apiCosts.flightradar24_credits_used}/30000, remaining: ${apiCosts.flightradar24_credits_remaining}`);
         
         await saveUsageTracking();
 
-        // Parse response - structure may differ from live/flight-positions/full
+        // Parse response - flight-summary/light returns complete flight data
         console.log(`[Flightradar24] Response for ${callsign}:`, JSON.stringify(response.data).substring(0, 500));
 
         // Handle response data structure - check if data array is empty
         if (!response.data?.data || response.data.data.length === 0) {
-            console.log(`[Flightradar24] No flight data found for ${callsign} (empty response)`);
+            console.log(`[Flightradar24] No flight data found for ${callsign} (empty response or outside time window)`);
             return null;
         }
         
@@ -942,55 +962,72 @@ async function getFlightradar24FlightInfo(callsign, flight) {
         // Log full response for debugging
         console.log(`[Flightradar24] Data for ${callsign}:`, JSON.stringify(flightData, null, 2));
 
-        // Determine airline display name
+        // GENERAL RULE: Always prioritize painted_as over operating_as
+        // painted_as = airline livery/branding shown on aircraft
+        // operating_as = actual operating carrier
         let airlineDisplay = null;
         let airlineLogoCode = null;
         
-        // Preserve regional carrier logic
+        // Use painted_as if available, fallback to operating_as
+        const displayAirline = flightData.painted_as || flightData.operating_as;
+        
+        // Special handling for regional carriers operating for major airlines
+        // Show only the partner airline (Delta, United, American), not the regional carrier
         if (flightData.operating_as === 'RPA' && flightData.painted_as) {
             const partnerAirlines = ['AAL', 'DAL', 'UAL'];
             if (partnerAirlines.includes(flightData.painted_as)) {
-                airlineDisplay = `Republic Airways (${flightData.painted_as})`;
+                // Don't set airlineDisplay - let frontend lookup partner airline name
                 airlineLogoCode = flightData.painted_as;
-                console.log(`[Flightradar24] Republic Airways operating as ${flightData.painted_as} for ${callsign}`);
+                console.log(`[Flightradar24] Republic Airways operating as ${flightData.painted_as} for ${callsign} - displaying as ${flightData.painted_as}`);
             }
         } else if (flightData.operating_as === 'EDV' && flightData.painted_as) {
             const partnerAirlines = ['DAL'];
             if (partnerAirlines.includes(flightData.painted_as)) {
-                airlineDisplay = `Endeavor Air (${flightData.painted_as})`;
                 airlineLogoCode = flightData.painted_as;
-                console.log(`[Flightradar24] Endeavor Air operating as ${flightData.painted_as} for ${callsign}`);
+                console.log(`[Flightradar24] Endeavor Air operating as ${flightData.painted_as} for ${callsign} - displaying as ${flightData.painted_as}`);
             }
         } else if (flightData.operating_as === 'GJS' && flightData.painted_as) {
             const partnerAirlines = ['UAL', 'DAL'];
             if (partnerAirlines.includes(flightData.painted_as)) {
-                airlineDisplay = `GoJet (${flightData.painted_as})`;
                 airlineLogoCode = flightData.painted_as;
-                console.log(`[Flightradar24] GoJet operating as ${flightData.painted_as} for ${callsign}`);
+                console.log(`[Flightradar24] GoJet operating as ${flightData.painted_as} for ${callsign} - displaying as ${flightData.painted_as}`);
             }
         } else if (flightData.operating_as === 'ENY' && flightData.painted_as) {
             const partnerAirlines = ['AAL'];
             if (partnerAirlines.includes(flightData.painted_as)) {
-                airlineDisplay = `Envoy Air (${flightData.painted_as})`;
                 airlineLogoCode = flightData.painted_as;
-                console.log(`[Flightradar24] Envoy Air operating as ${flightData.painted_as} for ${callsign}`);
+                console.log(`[Flightradar24] Envoy Air operating as ${flightData.painted_as} for ${callsign} - displaying as ${flightData.painted_as}`);
             }
+        }
+        
+        // If not a special regional case, use painted_as for logo
+        if (!airlineLogoCode && displayAirline) {
+            airlineLogoCode = displayAirline;
         }
 
         const result = {
             origin: flightData.orig_icao || flightData.origin?.icao || flightData.origin_icao || null,
-            destination: flightData.dest_icao || flightData.destination?.icao || flightData.destination_icao || null,
+            destination: flightData.dest_icao || flightData.dest_icao_actual || flightData.destination?.icao || flightData.destination_icao || null,
             aircraft_type: flightData.type || flightData.aircraft?.type || flightData.aircraft_type || null,
             airline: airlineDisplay,
             airline_logo_code: airlineLogoCode,
             aircraft_registration: flightData.reg || flightData.aircraft?.registration || flightData.registration || null,
-            eta: flightData.eta || flightData.arrival?.estimated || null,
+            departure_time: flightData.datetime_takeoff || null, // Departure time instead of ETA
             source: 'flightradar24'
         };
         
-        // Save to BOTH caches
-        saveRecentLookup(callsign, result);           // Tier 1: Recent (5 min)
-        await cacheFlightData(callsign, result);      // Tier 2: Persistent (7 days)
+        // Save to BOTH caches (without departure_time - cache is for route info only)
+        const cacheResult = {
+            origin: result.origin,
+            destination: result.destination,
+            aircraft_type: result.aircraft_type,
+            airline: result.airline,
+            airline_logo_code: result.airline_logo_code,
+            aircraft_registration: result.aircraft_registration,
+            source: result.source
+        };
+        saveRecentLookup(callsign, cacheResult);           // Tier 1: Recent (5 min)
+        await cacheFlightData(callsign, cacheResult);      // Tier 2: Persistent (7 days)
         
         return { ...result, from_cache: false };
     } catch (error) {
@@ -1295,6 +1332,16 @@ app.get('/api/flights', async (req, res) => {
             // OpenSky returns { time: number, states: [][] }
             // State index: 0: icao24, 1: callsign, 2: origin_country, 5: longitude, 6: latitude, 7: baro_altitude, 9: velocity, 10: true_track
             const rawFlights = response.data.states || [];
+            
+            console.log(`[OpenSky] Received ${rawFlights.length} total flights in area`);
+            
+            // Log first few flights for debugging
+            if (rawFlights.length > 0) {
+                console.log(`[OpenSky] Sample flight data (first 3):`);
+                rawFlights.slice(0, 3).forEach((state, idx) => {
+                    console.log(`  ${idx + 1}. icao24: ${state[0]}, callsign: "${state[1]?.trim()}", alt: ${state[7]}m, on_ground: ${state[8]}`);
+                });
+            }
 
             let flights = rawFlights
                 .filter(f => {

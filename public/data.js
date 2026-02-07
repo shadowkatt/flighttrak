@@ -19,6 +19,7 @@ const airlines = {
     'GJS': 'GoJet',
     'JZA': 'Air Canada Express',
     'PTR': 'Porter Airlines',
+    'POE': 'Porter Airlines',
     'LXJ': 'Flexjet',
     'JSX': 'JSX Air',
     'VJA': 'Vista America',
@@ -107,7 +108,8 @@ const airlines = {
     'TOM': 'TUI Airways',
     'EXS': 'Jet2',
     'GWI': 'Eurowings',
-    'RBA': 'Royal Brunei'
+    'RBA': 'Royal Brunei',
+    'FBU': 'French Bee'
 };
 
 function getAirlineName(icao) {
