@@ -951,9 +951,9 @@ async function getFlightradar24FlightInfo(callsign, flight) {
         
         // Using flight-summary/light with callsign and datetime window
         // Per FR24 docs: flight-summary/light = 2 credits (vs 8 for live/flight-positions/full)
-        // Requires datetime window - using 2 hour window to catch current flight without historical ones
+        // Requires datetime window - using 30 min window (flight is overhead, detected within seconds)
         const now = new Date();
-        const from = new Date(now.getTime() - (2 * 60 * 60 * 1000)); // 2 hours ago
+        const from = new Date(now.getTime() - (30 * 60 * 1000)); // 30 minutes ago
         const fromStr = from.toISOString().replace(/\.\d{3}Z$/, 'Z');
         const toStr = now.toISOString().replace(/\.\d{3}Z$/, 'Z');
         
