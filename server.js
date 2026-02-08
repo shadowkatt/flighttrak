@@ -384,6 +384,13 @@ const PRIVATE_FLIGHTS = process.env.PRIVATE_FLIGHTS ?
     process.env.PRIVATE_FLIGHTS.toLowerCase() : 'yes';
 const FILTER_PRIVATE_FLIGHTS = PRIVATE_FLIGHTS === 'no';
 
+// Private Jet/Charter Operators (frequently reuse callsigns throughout the day)
+// These callsigns should NOT be cached when credits are exhausted - use OpenSky only
+const PRIVATE_JET_OPERATORS = new Set([
+    'EJA', 'EJM', 'LXJ', 'FBU', 'GJS', 'XOJ', 'TMC', 'JRE', 'VJT',
+    'MMD', 'CFS', 'EJL', 'VCG', 'FLG', 'JIA', 'CMH', 'N',  // N for N-numbers (though filtered elsewhere)
+]);
+
 // Commercial Airlines ICAO Codes (for filtering private flights)
 // Based on FAA-authorized airline call signs from 123atc.com
 // Includes passenger airlines and cargo/shipping companies
@@ -424,6 +431,34 @@ function isCommercialFlight(callsign) {
     if (!callsign || callsign.length < 3) return false;
     const prefix = callsign.substring(0, 3).toUpperCase();
     return COMMERCIAL_AIRLINES.has(prefix);
+}
+
+function isPrivateJetOperator(callsign) {
+    if (!callsign || callsign.length < 3) return false;
+    
+    // Extract the 3-letter airline code from callsign
+    const airlineCode = callsign.substring(0, 3).toUpperCase();
+    
+    // Also check for N-numbers (N12345, etc.)
+    if (callsign.startsWith('N') && callsign.length > 1 && /\d/.test(callsign[1])) {
+        return true;
+    }
+    
+    return PRIVATE_JET_OPERATORS.has(airlineCode);
+}
+
+// Check if FR24 API is available (has credits and enabled)
+function isFR24Available() {
+    if (!FLIGHTRADAR24_ENABLED) return false;
+    return apiCosts.flightradar24_credits_remaining > 0;
+}
+
+// Check if FlightAware API is available (under cost cap, cap not $0, and enabled)
+function isFAAvailable() {
+    if (!FLIGHTAWARE_ENABLED) return false;
+    const costCap = parseFloat(process.env.FLIGHTAWARE_COST_CAP) || 25.00;
+    if (costCap === 0) return false; // Cost cap of $0 means disabled
+    return apiCosts.flightaware < costCap;
 }
 
 // Enhanced API Provider Selection (only ONE active at a time)
@@ -716,44 +751,41 @@ function shouldLookupFlightradar24(callsign, flight) {
 }
 
 async function getFlightAwareFlightInfo(ident, flight) {
-    if (!FLIGHTAWARE_ENABLED || !ident) return null;
+    if (!FLIGHTAWARE_ENABLED || !ident) return { success: false, reason: 'disabled', data: null };
     
-    // TIER 1: Check recent lookups first (prevents duplicate API calls within 5 min)
+    // Check recent lookups first (prevents duplicate API calls within 5 min)
     const recentData = getRecentLookup(ident);
     if (recentData) {
-        return { ...recentData, from_recent_cache: true };
+        console.log(`[FlightAware] ⚡ Using 5-min dedup cache for ${ident}`);
+        return { success: true, reason: 'cache', data: { ...recentData, from_recent_cache: true } };
     }
     
-    // TIER 2: Check if cost cap reached
+    // Check if cost cap reached (API unavailable)
     const costCap = parseFloat(process.env.FLIGHTAWARE_COST_CAP) || 25.00;
+    if (costCap === 0) {
+        console.log(`[FlightAware] Cost cap set to $0 - FA disabled`);
+        return { success: false, reason: 'disabled', data: null };
+    }
     if (apiCosts.flightaware >= costCap) {
-        console.log(`[FlightAware] Cost cap reached ($${apiCosts.flightaware.toFixed(2)}/$${costCap.toFixed(2)}), checking persistent cache for ${ident}`);
-        const cachedData = await getCachedFlightData(ident);
-        if (cachedData) {
-            return { 
-                ...cachedData, 
-                departure_time: null,  // Don't show stale departure time
-                from_cache: true 
-            };
-        }
-        console.log(`[FlightAware] No cache entry for ${ident}, returning null (cost cap reached)`);
-        return null;
+        console.log(`[FlightAware] 💰 Cost cap reached ($${apiCosts.flightaware.toFixed(2)}/$${costCap.toFixed(2)}) - API unavailable`);
+        return { success: false, reason: 'unavailable', data: null };
     }
     
     // Cost-saving filter: Only lookup major airlines within specified distance
     if (!shouldLookupFlightAware(ident, flight)) {
-        return null;
+        return { success: false, reason: 'filtered', data: null };
     }
 
     // Rate limiting check
     if (!canMakeFlightAwareCall()) {
         console.log(`[FlightAware] Rate limit reached, skipping ${ident}`);
-        return null;
+        return { success: false, reason: 'rate_limit', data: null };
     }
 
     try {
         recordFlightAwareCall();
         const startTime = Date.now();
+        console.log(`[FlightAware] 💰 API call: /flights/${ident}`);
         const response = await axios.get(`${FLIGHTAWARE_BASE_URL}/flights/${ident}`, {
             headers: {
                 'x-apikey': process.env.FLIGHTAWARE_API_KEY
@@ -845,7 +877,7 @@ async function getFlightAwareFlightInfo(ident, flight) {
                 source: 'flightaware'
             };
 
-            // Save to BOTH caches (without departure_time - cache is for route info only)
+            // Save to caches (without departure_time - cache is for route info only)
             const cacheResult = {
                 origin: result.origin,
                 destination: result.destination,
@@ -855,54 +887,62 @@ async function getFlightAwareFlightInfo(ident, flight) {
                 aircraft_registration: result.aircraft_registration,
                 source: result.source
             };
-            saveRecentLookup(ident, cacheResult);           // Tier 1: Recent (5 min)
-            await cacheFlightData(ident, cacheResult);      // Tier 2: Persistent (7 days)
+            
+            // Always save to 5-min dedup cache (prevents duplicate API calls)
+            saveRecentLookup(ident, cacheResult);
+            
+            // Only persist to 7-day cache for commercial flights (private jets reuse callsigns)
+            if (!isPrivateJetOperator(ident)) {
+                // Only write to persistent cache when approaching API limits (saves disk I/O)
+                const shouldPersistCache = 
+                    apiCosts.flightradar24_credits_remaining < 5000 || 
+                    apiCosts.flightaware > 20;
+                
+                if (shouldPersistCache) {
+                    await cacheFlightData(ident, cacheResult);
+                    console.log(`[FlightAware] 💾 Cached ${ident} (approaching limits: FR24=${apiCosts.flightradar24_credits_remaining}, FA=$${apiCosts.flightaware.toFixed(2)})`);
+                }
+            } else {
+                console.log(`[FlightAware] 🚁 ${ident} is private jet - NOT cached (callsign reused)`);
+            }
 
-            return { ...result, from_cache: false };
+            return { success: true, reason: 'api', data: { ...result, from_cache: false } };
         }
-        return null;
+        return { success: false, reason: 'no_data', data: null };
     } catch (error) {
         // Silent fail - FlightAware is optional
         if (error.response && error.response.status !== 404) {
             console.error(`[FlightAware] Error fetching ${ident}:`, error.message);
         }
-        return null;
+        return { success: false, reason: 'error', data: null };
     }
 }
 
 async function getFlightradar24FlightInfo(callsign, flight) {
-    if (!FLIGHTRADAR24_ENABLED || !callsign) return null;
+    if (!FLIGHTRADAR24_ENABLED || !callsign) return { success: false, reason: 'disabled', data: null };
     
-    // TIER 1: Check recent lookups first (prevents duplicate API calls within 5 min)
+    // Check recent lookups first (prevents duplicate API calls within 5 min)
     const recentData = getRecentLookup(callsign);
     if (recentData) {
-        return { ...recentData, from_recent_cache: true };
+        console.log(`[FR24] ⚡ Using 5-min dedup cache for ${callsign}`);
+        return { success: true, reason: 'cache', data: { ...recentData, from_recent_cache: true } };
     }
     
-    // TIER 2: Check if credits exhausted - use persistent cache if available
+    // Check if credits exhausted (API unavailable)
     if (apiCosts.flightradar24_credits_remaining <= 0) {
-        console.log(`[FR24] Credits exhausted (${apiCosts.flightradar24_credits_used}/30000), checking persistent cache for ${callsign}`);
-        const cachedData = await getCachedFlightData(callsign);
-        if (cachedData) {
-            return { 
-                ...cachedData, 
-                departure_time: null,  // Explicitly null - don't show stale departure time
-                from_cache: true 
-            };
-        }
-        console.log(`[FR24] No cache entry for ${callsign}, returning null (will show OpenSky only)`);
-        return null;
+        console.log(`[FR24] 💳 Credits exhausted (${apiCosts.flightradar24_credits_used}/30000) - API unavailable`);
+        return { success: false, reason: 'unavailable', data: null };
     }
 
     // Credits available - proceed with normal altitude/filter checks
     if (!shouldLookupFlightradar24(callsign, flight)) {
-        return null;
+        return { success: false, reason: 'filtered', data: null };
     }
 
     // Rate limiting check
     if (!canMakeFlightradar24Call()) {
         console.log(`[Flightradar24] Rate limit reached, skipping ${callsign}`);
-        return null;
+        return { success: false, reason: 'rate_limit', data: null };
     }
 
     try {
@@ -918,7 +958,7 @@ async function getFlightradar24FlightInfo(callsign, flight) {
         const toStr = now.toISOString().replace(/\.\d{3}Z$/, 'Z');
         
         const url = `${FLIGHTRADAR24_BASE_URL}/flight-summary/light`;
-        console.log(`[Flightradar24] Requesting flight summary (2 credits): ${url}?callsigns=${callsign}&flight_datetime_from=${fromStr}`);
+        console.log(`[Flightradar24] 💰 API call (2 credits): ${url}?callsigns=${callsign}&flight_datetime_from=${fromStr}`);
         
         const response = await axios.get(url, {
             headers: {
@@ -954,7 +994,7 @@ async function getFlightradar24FlightInfo(callsign, flight) {
         // Handle response data structure - check if data array is empty
         if (!response.data?.data || response.data.data.length === 0) {
             console.log(`[Flightradar24] No flight data found for ${callsign} (empty response or outside time window)`);
-            return null;
+            return { success: false, reason: 'no_data', data: null };
         }
         
         const flightData = response.data.data[0];
@@ -1016,7 +1056,7 @@ async function getFlightradar24FlightInfo(callsign, flight) {
             source: 'flightradar24'
         };
         
-        // Save to BOTH caches (without departure_time - cache is for route info only)
+        // Save to caches (without departure_time - cache is for route info only)
         const cacheResult = {
             origin: result.origin,
             destination: result.destination,
@@ -1026,10 +1066,26 @@ async function getFlightradar24FlightInfo(callsign, flight) {
             aircraft_registration: result.aircraft_registration,
             source: result.source
         };
-        saveRecentLookup(callsign, cacheResult);           // Tier 1: Recent (5 min)
-        await cacheFlightData(callsign, cacheResult);      // Tier 2: Persistent (7 days)
         
-        return { ...result, from_cache: false };
+        // Always save to 5-min dedup cache (prevents duplicate API calls)
+        saveRecentLookup(callsign, cacheResult);
+        
+        // Only persist to 7-day cache for commercial flights (private jets reuse callsigns)
+        if (!isPrivateJetOperator(callsign)) {
+            // Only write to persistent cache when approaching API limits (saves disk I/O)
+            const shouldPersistCache = 
+                apiCosts.flightradar24_credits_remaining < 5000 || 
+                apiCosts.flightaware > 20;
+            
+            if (shouldPersistCache) {
+                await cacheFlightData(callsign, cacheResult);
+                console.log(`[FR24] 💾 Cached ${callsign} (approaching limits: FR24=${apiCosts.flightradar24_credits_remaining}, FA=$${apiCosts.flightaware.toFixed(2)})`);
+            }
+        } else {
+            console.log(`[FR24] 🚁 ${callsign} is private jet - NOT cached (callsign reused)`);
+        }
+        
+        return { success: true, reason: 'api', data: { ...result, from_cache: false } };
     } catch (error) {
         // Log detailed error for debugging
         if (error.response) {
@@ -1038,7 +1094,7 @@ async function getFlightradar24FlightInfo(callsign, flight) {
         } else {
             console.error(`[Flightradar24] Error fetching ${callsign}:`, error.message);
         }
-        return null;
+        return { success: false, reason: 'error', data: null };
     }
 }
 
@@ -1467,31 +1523,66 @@ app.get('/api/route/:icao24', async (req, res) => {
         console.log(`[Route Request] WARNING: ${callsign || icao24} has invalid/missing altitude (${altitude}). Will fall back to OpenSky.`);
     }
 
-    // Use ONLY the active enhanced provider (not both)
+    // NEW SIMPLIFIED LOGIC: Try both APIs, then cache as last resort
     if (callsign && callsign.length > 2) {
-        if (ACTIVE_ENHANCED_PROVIDER === 'flightradar24' && FLIGHTRADAR24_ENABLED) {
-            routeData = await getFlightradar24FlightInfo(callsign, flightForLookup);
-            
-            // Only fallback if FR24 has credits available but returned no data
-            // Don't fallback when credits exhausted (cache checked already)
-            // Also check if FA cost cap has been reached
-            const fr24HasCredits = apiCosts.flightradar24_credits_remaining > 0;
-            const faCostCap = parseFloat(process.env.FLIGHTAWARE_COST_CAP) || 25.00;
-            const faCostCapReached = apiCosts.flightaware >= faCostCap;
-            
-            if (!routeData && FLIGHTAWARE_ENABLED && fr24HasCredits && !faCostCapReached) {
-                console.log(`[Route Request] FR24 returned no data for ${callsign}, trying FlightAware fallback...`);
-                routeData = await getFlightAwareFlightInfo(callsign, flightForLookup);
-            } else if (!routeData && FLIGHTAWARE_ENABLED && faCostCapReached) {
-                console.log(`[Route Request] FR24 returned no data for ${callsign}, but FlightAware cost cap reached ($${apiCosts.flightaware.toFixed(2)}/$${faCostCap.toFixed(2)})`);
+        let primaryResult = null;
+        let secondaryResult = null;
+        
+        // Step 1: Try primary API
+        if (ACTIVE_ENHANCED_PROVIDER === 'flightradar24' && isFR24Available()) {
+            console.log(`[Route Request] Trying FR24 (primary)...`);
+            primaryResult = await getFlightradar24FlightInfo(callsign, flightForLookup);
+            if (primaryResult.success) {
+                routeData = primaryResult.data;
             }
-        } else if (ACTIVE_ENHANCED_PROVIDER === 'flightaware' && FLIGHTAWARE_ENABLED) {
-            routeData = await getFlightAwareFlightInfo(callsign, flightForLookup);
+        } else if (ACTIVE_ENHANCED_PROVIDER === 'flightaware' && isFAAvailable()) {
+            console.log(`[Route Request] Trying FA (primary)...`);
+            primaryResult = await getFlightAwareFlightInfo(callsign, flightForLookup);
+            if (primaryResult.success) {
+                routeData = primaryResult.data;
+            }
+        }
+        
+        // Step 2: If primary returned no data, try secondary API (but ONLY if primary didn't filter it out)
+        if (!routeData && primaryResult && primaryResult.reason !== 'filtered') {
+            if (ACTIVE_ENHANCED_PROVIDER === 'flightradar24' && isFAAvailable()) {
+                console.log(`[Route Request] FR24 returned no data (${primaryResult.reason}), trying FA (secondary)...`);
+                secondaryResult = await getFlightAwareFlightInfo(callsign, flightForLookup);
+                if (secondaryResult.success) {
+                    routeData = secondaryResult.data;
+                }
+            } else if (ACTIVE_ENHANCED_PROVIDER === 'flightaware' && isFR24Available()) {
+                console.log(`[Route Request] FA returned no data (${primaryResult.reason}), trying FR24 (secondary)...`);
+                secondaryResult = await getFlightradar24FlightInfo(callsign, flightForLookup);
+                if (secondaryResult.success) {
+                    routeData = secondaryResult.data;
+                }
+            }
+        } else if (!routeData && primaryResult && primaryResult.reason === 'filtered') {
+            console.log(`[Route Request] ⛔ ${callsign} filtered by primary API (altitude/distance) - skipping secondary (same filters)`);
+        }
+        
+        // Step 3: LAST RESORT - If BOTH APIs unavailable/failed, check persistent cache
+        if (!routeData && !isFR24Available() && !isFAAvailable()) {
+            console.log(`[Route Request] 🚨 BOTH APIs unavailable - checking cache as last resort`);
             
-            // If FA returns null/empty and FR24 is available, try it as fallback
-            if (!routeData && FLIGHTRADAR24_ENABLED) {
-                console.log(`[Route Request] FlightAware returned no data for ${callsign}, trying FR24 fallback...`);
-                routeData = await getFlightradar24FlightInfo(callsign, flightForLookup);
+            // For private jets: skip cache, return null (OpenSky only)
+            if (isPrivateJetOperator(callsign)) {
+                console.log(`[Route Request] 🚁 ${callsign} is private jet - NO CACHE (OpenSky only)`);
+            } else {
+                // For commercial flights: check persistent cache
+                console.log(`[Route Request] 📦 Checking 7-day cache for ${callsign}`);
+                const cachedData = await getCachedFlightData(callsign);
+                if (cachedData) {
+                    console.log(`[Route Request] ✓ Serving from cache (cached: ${cachedData.cached_at})`);
+                    routeData = {
+                        ...cachedData,
+                        departure_time: null, // Don't show stale departure time
+                        from_cache: true
+                    };
+                } else {
+                    console.log(`[Route Request] ✗ No cache entry for ${callsign}`);
+                }
             }
         }
     }
@@ -1500,9 +1591,8 @@ app.get('/api/route/:icao24', async (req, res) => {
         return res.json(routeData);
     }
 
-    // If FR24/FA rejected the flight (altitude/filter), return basic data from flight list source
-    // Don't make additional API calls - just return what we already have from the flight list
-    console.log(`[Route Request] ${callsign || icao24} rejected by enhanced provider filters. Returning basic data from flight list source.`);
+    // If no data from any source (APIs failed/unavailable, not in cache, or rejected by filters)
+    console.log(`[Route Request] ${callsign || icao24} - no route data available from any source`);
     
     // Return basic flight data structure with nulls for route details
     // The UI will display the flight with position/altitude but no origin/destination
@@ -1510,8 +1600,7 @@ app.get('/api/route/:icao24', async (req, res) => {
         origin: null, 
         destination: null, 
         aircraft_type: null,
-        // Note: Position and altitude are already in the flight list data sent separately
-        message: 'Enhanced route data not available (rejected by provider filters)'
+        message: 'Enhanced route data not available'
     });
 });
 
