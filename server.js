@@ -951,9 +951,9 @@ async function getFlightradar24FlightInfo(callsign, flight) {
         
         // Using flight-summary/light with callsign and datetime window
         // Per FR24 docs: flight-summary/light = 2 credits (vs 8 for live/flight-positions/full)
-        // Requires datetime window - using 8 hour window to catch recent flights
+        // Requires datetime window - using 2 hour window to catch current flight without historical ones
         const now = new Date();
-        const from = new Date(now.getTime() - (8 * 60 * 60 * 1000)); // 8 hours ago
+        const from = new Date(now.getTime() - (2 * 60 * 60 * 1000)); // 2 hours ago
         const fromStr = from.toISOString().replace(/\.\d{3}Z$/, 'Z');
         const toStr = now.toISOString().replace(/\.\d{3}Z$/, 'Z');
         
@@ -997,7 +997,21 @@ async function getFlightradar24FlightInfo(callsign, flight) {
             return { success: false, reason: 'no_data', data: null };
         }
         
-        const flightData = response.data.data[0];
+        // FR24 can return multiple flights with same callsign (e.g., completed + active)
+        // Priority: 1) Active flights (not ended), 2) Most recent flight
+        const flights = response.data.data;
+        console.log(`[FR24] Received ${flights.length} flight(s) for ${callsign}`);
+        
+        // Find active flight (flight_ended = false or null)
+        let flightData = flights.find(f => !f.flight_ended);
+        
+        if (!flightData) {
+            // All flights ended - use most recent (first in array)
+            flightData = flights[0];
+            console.log(`[FR24] All flights ended for ${callsign}, using most recent`);
+        } else if (flights.length > 1) {
+            console.log(`[FR24] Selected active flight for ${callsign} (filtered out ${flights.length - 1} completed flight(s))`);
+        }
 
         // Log full response for debugging
         console.log(`[Flightradar24] Data for ${callsign}:`, JSON.stringify(flightData, null, 2));
