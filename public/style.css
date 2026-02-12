@@ -78,6 +78,15 @@ header {
   font-weight: 500;
 }
 
+/* Fix time display to prevent shifting when seconds change */
+#local-time {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  display: inline-block;
+  min-width: 95px; /* Reserve space for HH:MM:SS AM/PM */
+  text-align: center;
+}
+
 .api-selector {
   display: flex;
   align-items: center;
@@ -768,6 +777,7 @@ main {
   font-family: 'Roboto Mono', monospace;
   font-size: 0.9rem;
   table-layout: fixed;
+  will-change: auto;
 }
 
 .flight-log-table th {
@@ -782,12 +792,16 @@ main {
 }
 
 .flight-log-table th:nth-child(1) {
-  width: 10%;
+  width: 9%;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  min-width: 90px;
+  max-width: 90px;
 }
 
 /* TIME */
 .flight-log-table th:nth-child(2) {
-  width: 14%;
+  width: 12%;
 }
 
 /* AIRLINE */
@@ -797,17 +811,17 @@ main {
 
 /* CALLSIGN */
 .flight-log-table th:nth-child(4) {
-  width: 10%;
+  width: 9%;
 }
 
 /* TYPE */
 .flight-log-table th:nth-child(5) {
-  width: 18%;
+  width: 16%;
 }
 
 /* ORIGIN */
 .flight-log-table th:nth-child(6) {
-  width: 18%;
+  width: 16%;
 }
 
 /* DEST */
@@ -826,6 +840,11 @@ main {
 }
 
 /* VR */
+.flight-log-table th:nth-child(10) {
+  width: 8%;
+}
+
+/* DETECTED */
 
 .flight-log-table td {
   padding: 10px;
@@ -834,6 +853,23 @@ main {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* TIME column - use tabular numbers to prevent shifting */
+.flight-log-table td:nth-child(1) {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  min-width: 90px;
+  max-width: 90px;
+  width: 90px;
+}
+
+.time-display {
+  display: inline-block;
+  width: 70px;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  letter-spacing: 0;
 }
 
 .flight-log-table tr:first-child td {
@@ -1026,93 +1062,138 @@ footer {
   background: #555;
 }
 
-/* Mobile Responsiveness */
+/* ===== MOBILE & TABLET RESPONSIVE STYLES ===== */
+
+/* Mobile - All Phones (up to 768px) */
 @media (max-width: 768px) {
 
-  /* Header Redesign */
+  /* Header - Compact Vertical Stack */
   header {
-    height: auto;
-    padding: 15px 20px;
-    flex-direction: column;
-    gap: 15px;
-    background: rgba(0, 0, 0, 0.95);
+    height: auto !important;
+    padding: 12px 15px !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    background: rgba(0, 0, 0, 0.98) !important;
   }
 
   .logo {
     width: 100%;
     justify-content: center;
-    font-size: 1.4rem;
-    padding-bottom: 5px;
+    font-size: 1.3rem;
+    padding-bottom: 8px;
     border-bottom: 1px solid #222;
+    gap: 8px;
   }
 
   .logo-icon {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
   }
 
   .status-bar {
-    width: 100%;
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 10px;
-    text-align: center;
-    font-size: 0.7rem;
-    color: #666;
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+    font-size: 0.65rem !important;
   }
 
-  /* Force "TIME" to be last or distinct if needed */
   .status-item {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    justify-content: center;
-    align-items: center;
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 4px !important;
+    justify-content: center !important;
+    align-items: center !important;
+    padding: 8px 6px !important;
+    background: rgba(255, 255, 255, 0.02) !important;
+    border-radius: 4px !important;
+    min-height: 50px !important;
+    text-align: center !important;
   }
 
   .status-item span {
     display: block;
     color: var(--accent-color);
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     font-weight: 700;
+    line-height: 1.2;
+  }
+  
+  /* Fix time display width on mobile */
+  .status-item #local-time {
+    min-width: 85px;
+    font-size: 0.8rem;
   }
 
-  /* Show ZIP on mobile but maybe smaller */
-  .status-item:first-child {
-    display: flex;
-    /* Override previous hide */
+  /* Hide API selector on mobile - takes too much space */
+  .api-selector {
+    grid-column: 1 / -1;
+    justify-content: center;
+    font-size: 0.65rem;
+    padding: 8px;
   }
 
-  /* Banner Adjustments */
+  /* Hide Banner Grid on Mobile - Show only Recent Traffic */
   .banner-grid {
-    padding: 15px;
-    grid-template-columns: 1fr;
-    /* Single column on mobile */
-    min-height: auto;
+    display: none !important;
   }
 
-  .banner-card {
-    padding: 12px;
-  }
-
-  .banner-callsign {
-    font-size: 1.1rem;
+  /* Hide flight popup on mobile too */
+  .flight-popup {
+    display: none !important;
   }
 
   /* Main Content */
   main {
-    padding: 15px;
-    padding-top: 40px;
-    /* Space for banner if active */
+    padding: 10px;
+    padding-bottom: 90px;
+    overflow-y: auto;
   }
 
-  .flight-grid {
-    grid-template-columns: 1fr;
-    /* Single column */
-    gap: 15px;
+  /* History Container - Full screen on mobile */
+  .history-container {
+    padding: 15px 12px;
+    padding-bottom: 80px;
+    margin-top: 0;
+    background: #0a0a0a;
+    border-radius: 0;
+    flex: 1;
   }
 
-  /* History Card View transformation */
+  .history-header {
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+    margin-bottom: 15px;
+  }
+
+  .history-header h3 {
+    font-size: 1rem;
+    text-align: center;
+    letter-spacing: 1.5px;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+
+  .history-controls {
+    flex-direction: column;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .search-box {
+    width: 100%;
+    font-size: 0.85rem;
+    height: 38px;
+  }
+
+  .export-btn {
+    width: 100%;
+    height: 38px;
+    justify-content: center;
+  }
+
+  /* History Table - Card View */
   .flight-log-table,
   .flight-log-table thead,
   .flight-log-table tbody,
@@ -1129,17 +1210,17 @@ footer {
   }
 
   .flight-log-table tr {
-    border: 1px solid #222;
-    margin-bottom: 15px;
-    padding: 15px;
-    background: #0f0f0f;
+    border: 1px solid #333;
+    margin-bottom: 12px;
+    padding: 12px;
+    background: linear-gradient(135deg, #1a1a1a 0%, #0f0f0f 100%);
     border-radius: 8px;
-    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    border-left: 3px solid var(--accent-color);
   }
 
   .flight-log-table td {
     border: none;
-    border-bottom: 1px solid #1a1a1a;
+    border-bottom: 1px solid #222;
     position: relative;
     padding: 8px 0;
     text-align: right;
@@ -1147,6 +1228,7 @@ footer {
     justify-content: space-between;
     align-items: center;
     color: #ddd;
+    font-size: 0.85rem;
   }
 
   .flight-log-table td:last-child {
@@ -1155,19 +1237,284 @@ footer {
 
   .flight-log-table td::before {
     position: relative;
-    padding-right: 10px;
+    padding-right: 12px;
     white-space: nowrap;
-    color: #555;
+    color: var(--text-secondary);
     font-size: 0.7rem;
-    font-weight: 700;
+    font-weight: 600;
     text-transform: uppercase;
     content: attr(data-label);
+    flex-shrink: 0;
   }
 
-  /* Specific tweaks for Airline/Callsign in Card View */
-  .flight-log-table td[data-label="CALLSIGN"] strong {
+  .flight-log-table td[data-label="CALLSIGN"] {
     font-size: 1.1rem;
+    font-weight: 700;
     color: #fff;
+  }
+
+  .table-logo-container {
+    width: 30px;
+    height: 20px;
+  }
+
+  .airline-logo-sm {
+    height: 20px;
+    max-width: 30px;
+  }
+
+  /* Flight Popup - Mobile Optimized */
+  .flight-popup {
+    min-width: auto;
+    width: calc(100% - 40px);
+    max-width: 90%;
+    padding: 15px 20px;
+  }
+
+  .flight-popup-header {
+    font-size: 0.75rem;
+    margin-bottom: 10px;
+  }
+
+  .flight-popup-content {
+    grid-template-columns: 60px 1fr;
+    gap: 12px;
+  }
+
+  .flight-popup-logo {
+    width: 60px;
+    height: 36px;
+  }
+
+  .flight-popup-logo img {
+    max-height: 36px;
+    max-width: 60px;
+  }
+
+  .flight-popup-callsign {
+    font-size: 1.2rem;
+  }
+
+  .flight-popup-route {
+    font-size: 0.9rem;
+  }
+
+  .flight-popup-type {
+    font-size: 0.75rem;
+  }
+
+  /* Modal - Mobile Optimized */
+  .modal-content {
+    width: 95%;
+    max-width: 95%;
+  }
+
+  .modal-header {
+    padding: 15px 20px;
+  }
+
+  .modal-header h2 {
+    font-size: 1.2rem;
+  }
+
+  .modal-body {
+    padding: 20px;
+  }
+
+  .form-group input,
+  .form-group select {
+    padding: 10px 12px;
+    font-size: 0.9rem;
+  }
+
+  .form-actions {
+    flex-direction: column;
+  }
+
+  .btn-primary,
+  .btn-secondary {
+    width: 100%;
+    padding: 12px 20px;
+  }
+
+  /* Footer */
+  footer {
+    padding: 8px 15px;
+  }
+
+  .footer-content {
+    flex-direction: column;
+    gap: 8px;
+    font-size: 0.65rem;
+  }
+
+  .api-calls {
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+    font-size: 0.65rem;
+  }
+
+  .reset-date {
+    font-size: 0.65rem;
+    text-align: center;
+  }
+
+  /* Facts Ticker */
+  .facts-ticker {
+    bottom: 90px;
+    padding: 5px 15px;
+  }
+
+  .facts-content {
+    font-size: 0.7rem;
+  }
+}
+
+/* Tablet - iPad Portrait (769px - 1024px) */
+@media (min-width: 769px) and (max-width: 1024px) {
+
+  /* Header - Compact but horizontal */
+  header {
+    height: 70px;
+    padding: 0 30px;
+  }
+
+  .logo {
+    font-size: 1.3rem;
+    gap: 10px;
+  }
+
+  .status-bar {
+    gap: 15px;
+    font-size: 0.8rem;
+  }
+
+  .status-item span {
+    font-size: 0.85rem;
+  }
+
+  .api-selector {
+    font-size: 0.75rem;
+  }
+
+  .radio-label {
+    padding: 3px 10px;
+  }
+
+  .radio-label span {
+    font-size: 0.75rem;
+  }
+
+  /* Banner Cards - 2 columns on tablet would be too cramped, keep 1 column */
+  .banner-grid {
+    padding: 12px 25px;
+    gap: 8px;
+  }
+
+  .banner-card {
+    grid-template-columns: 90px 200px 1fr 180px 250px;
+    gap: 15px;
+    padding: 10px 18px;
+    font-size: 1rem;
+    min-height: 90px;
+  }
+
+  .banner-callsign {
+    font-size: 1.6rem;
+  }
+
+  .banner-route {
+    font-size: 1.2rem;
+  }
+
+  .banner-type {
+    font-size: 1rem;
+  }
+
+  .banner-metrics {
+    font-size: 1.1rem;
+    gap: 10px;
+  }
+
+  /* Main Content */
+  main {
+    padding: 0 30px 20px 30px;
+  }
+
+  /* History Container */
+  .history-container {
+    padding: 18px;
+    padding-bottom: 50px;
+  }
+
+  .history-header h3 {
+    font-size: 0.95rem;
+  }
+
+  .search-box {
+    width: 180px;
+    font-size: 0.8rem;
+  }
+
+  /* History Table - Keep table format but optimize */
+  .flight-log-table {
+    font-size: 0.85rem;
+  }
+
+  .flight-log-table th,
+  .flight-log-table td {
+    padding: 9px 8px;
+  }
+
+  .flight-log-table th {
+    font-size: 0.7rem;
+  }
+
+  /* Adjust column widths for tablet */
+  .flight-log-table th:nth-child(1),
+  .flight-log-table td:nth-child(1) {
+    min-width: 80px;
+    max-width: 80px;
+  }
+
+  .flight-log-table th:nth-child(5),
+  .flight-log-table th:nth-child(6) {
+    width: 15%;
+  }
+
+  /* Footer */
+  footer {
+    padding: 8px 25px;
+  }
+
+  .footer-content {
+    gap: 20px;
+  }
+
+  .api-calls {
+    font-size: 0.7rem;
+    gap: 12px;
+  }
+
+  .reset-date {
+    font-size: 0.7rem;
+  }
+
+  /* Facts Ticker */
+  .facts-ticker {
+    bottom: 35px;
+    padding: 5px 20px;
+  }
+
+  .facts-content {
+    font-size: 0.75rem;
+  }
+
+  /* Flight Popup */
+  .flight-popup {
+    min-width: 380px;
+    max-width: 500px;
   }
 }
 
