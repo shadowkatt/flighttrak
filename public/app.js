@@ -24,6 +24,7 @@ let ALTITUDE_THRESHOLD_FEET = null; // Loaded from server config (.env), no hard
 let availableProviders = {}; // Track which API providers are available
 let activeProvider = 'flightradar24'; // Current active enhanced provider (only ONE at a time)
 let configLoaded = false; // Track if config has been loaded from server
+let currentLocation = { lat: null, lon: null }; // Store base location from config for distance calculations
 
 
 
@@ -590,7 +591,8 @@ function addToHistory(flight) {
         vr: vrFpm,
         logo: logoUrl,
         airline: flight.airline || getAirlineName(callsign), // Use API airline (e.g., "RPA (UAL)")
-        type: flight.aircraft_type || aircraftCategories[flight.category] || 'N/A'
+        type: flight.aircraft_type || aircraftCategories[flight.category] || 'N/A',
+        detectedMiles: flight.detectedMiles || null // Store detected distance in miles
     };
 
     // Track this flight's timestamp
@@ -652,7 +654,7 @@ function renderHistory() {
     
     historyLogBody.innerHTML = filteredHistory.map(entry => `
         <tr>
-            <td data-label="TIME">${entry.time}</td>
+            <td data-label="TIME"><span class="time-display">${entry.time}</span></td>
             <td data-label="AIRLINE" style="color:#aaa;">${entry.airline || '-'}</td>
             <td data-label="CALLSIGN">
                 <div class="table-logo-container">
@@ -666,6 +668,7 @@ function renderHistory() {
             <td data-label="ALTITUDE">${entry.alt.toLocaleString()}</td>
             <td data-label="SPEED">${entry.speed}</td>
             <td data-label="VR">${entry.vr}</td>
+            <td data-label="DETECTED">${entry.detectedMiles ? entry.detectedMiles.toFixed(2) + ' mi' : '-'}</td>
         </tr>
     `).join('');
 }
@@ -794,6 +797,10 @@ async function fetchConfig() {
 
         // Update altitude threshold based on active provider (from .env only)
         updateAltitudeDisplay(config);
+        
+        // Store location for distance calculations
+        currentLocation.lat = config.lat;
+        currentLocation.lon = config.lon;
         
         // Mark config as loaded
         configLoaded = true;
@@ -1060,6 +1067,18 @@ document.addEventListener('click', (e) => {
 });
 
 // Initialize
+// Haversine Distance Calculation - for test mode
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 3958.8; // Earth's radius in miles
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distance in miles
+}
+
 // Test Data Generator - Creates a full page of diverse test flights
 function loadTestData() {
     // Generate ETAs (30 min to 3 hours from now)
@@ -1105,6 +1124,13 @@ function loadTestData() {
         { icao24: 't01234', callsign: 'DAL2453 ', altitude: 11582, velocity: 235.7, vertical_rate: 0, heading: 45, category: 3, on_ground: false, latitude: 40.69, longitude: -74.25, origin_country: 'United States', routeOrigin: 'KSEA', routeDestination: 'KJFK', aircraft_type: 'A321' },
     ];
     
+    // Calculate distances for test flights based on currentLocation
+    const baseLat = currentLocation?.lat || 40.6895;
+    const baseLon = currentLocation?.lon || -74.1745;
+    testFlights.forEach(flight => {
+        flight.detectedMiles = calculateDistance(baseLat, baseLon, flight.latitude, flight.longitude);
+    });
+    
     console.log(`[TEST MODE] Loading ${testFlights.length} test flights for UI testing...`);
     processFlights(testFlights);
 }
@@ -1118,20 +1144,21 @@ function exportHistoryToCSV() {
     }
 
     // CSV Headers
-    const headers = ['Time', 'Airline', 'Callsign', 'Aircraft Type', 'Origin', 'Destination', 'Altitude (ft)', 'Speed (kts)', 'Vertical Rate (fpm)'];
+    const headers = ['Time', 'Airline', 'Callsign', 'Aircraft Type', 'Origin', 'Destination', 'Altitude (ft)', 'Speed (mph)', 'Vertical Rate (fpm)', 'Detected (mi)'];
     
     // Convert flight history to CSV rows
     const rows = flightHistory.map(flight => {
         return [
-            flight.timestamp || '',
+            flight.time || '',
             flight.airline || '',
             flight.callsign || '',
-            flight.aircraft_type || '',
+            flight.type || '',
             flight.origin || '',
-            flight.destination || '',
-            flight.altitude || '',
-            flight.velocity || '',
-            flight.vertical_rate || ''
+            flight.dest || '',
+            flight.alt || '',
+            flight.speed || '',
+            flight.vr || '',
+            flight.detectedMiles ? flight.detectedMiles.toFixed(2) : ''
         ];
     });
 
@@ -1173,6 +1200,11 @@ const isTestMode = urlParams.get('test') === 'true';
 
 if (isTestMode) {
     console.log('[TEST MODE] Enabled - API polling disabled. Press T to load test data');
+    
+    // Load config even in test mode (needed for altitude filtering and UI updates)
+    fetchConfig();
+    fetchCost();
+    
     document.addEventListener('keydown', (e) => {
         if (e.key === 't' || e.key === 'T') {
             loadTestData();

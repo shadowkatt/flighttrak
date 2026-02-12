@@ -1191,28 +1191,35 @@ async function fetchFlightsFromADSB(lat, lon, offset) {
                 
                 return !onGround && hasValidAlt && f.lat && f.lon;
             })
-            .map(f => ({
-                icao24: (f.hex || '').toLowerCase(),
-                callsign: (f.flight || '').trim(),
-                origin_country: f.flag || 'Unknown',
-                time_position: f.seen_pos ? Math.floor(Date.now() / 1000) - Math.floor(f.seen_pos) : Math.floor(Date.now() / 1000),
-                last_contact: f.seen ? Math.floor(Date.now() / 1000) - Math.floor(f.seen) : Math.floor(Date.now() / 1000),
-                longitude: parseFloat(f.lon),
-                latitude: parseFloat(f.lat),
-                altitude: parseInt(f.alt_baro) * 0.3048, // Convert feet to meters
-                velocity: f.gs ? parseFloat(f.gs) * 0.514444 : 0, // Convert knots to m/s
-                heading: parseFloat(f.track) || 0,
-                vertical_rate: f.baro_rate ? parseFloat(f.baro_rate) * 0.00508 : 0, // Convert fpm to m/s
-                on_ground: f.gnd === "1" || f.gnd === 1,
-                category: f.category || null,
-                // ADSBexchange BONUS: Aircraft type included!
-                aircraft_type: f.t || null,
-                // Additional useful data
-                registration: f.r || null,
-                // Note: ADSBexchange doesn't provide origin/destination in basic feed
-                routeOrigin: null,
-                routeDestination: null
-            }));
+            .map(f => {
+                const flightLat = parseFloat(f.lat);
+                const flightLon = parseFloat(f.lon);
+                const distanceMiles = calculateDistance(lat, lon, flightLat, flightLon);
+                
+                return {
+                    icao24: (f.hex || '').toLowerCase(),
+                    callsign: (f.flight || '').trim(),
+                    origin_country: f.flag || 'Unknown',
+                    time_position: f.seen_pos ? Math.floor(Date.now() / 1000) - Math.floor(f.seen_pos) : Math.floor(Date.now() / 1000),
+                    last_contact: f.seen ? Math.floor(Date.now() / 1000) - Math.floor(f.seen) : Math.floor(Date.now() / 1000),
+                    longitude: flightLon,
+                    latitude: flightLat,
+                    altitude: parseInt(f.alt_baro) * 0.3048, // Convert feet to meters
+                    velocity: f.gs ? parseFloat(f.gs) * 0.514444 : 0, // Convert knots to m/s
+                    heading: parseFloat(f.track) || 0,
+                    vertical_rate: f.baro_rate ? parseFloat(f.baro_rate) * 0.00508 : 0, // Convert fpm to m/s
+                    on_ground: f.gnd === "1" || f.gnd === 1,
+                    category: f.category || null,
+                    // ADSBexchange BONUS: Aircraft type included!
+                    aircraft_type: f.t || null,
+                    // Additional useful data
+                    registration: f.r || null,
+                    // Note: ADSBexchange doesn't provide origin/destination in basic feed
+                    routeOrigin: null,
+                    routeDestination: null,
+                    detectedMiles: distanceMiles // Distance from base location in miles
+                };
+            });
         
         // Apply commercial airline filter if enabled
         let filteredFlights = flights;
@@ -1420,21 +1427,28 @@ app.get('/api/flights', async (req, res) => {
                     const altitude = f[7];
                     return !onGround && altitude > 0;
                 })
-                .map(f => ({
-                    icao24: f[0],
-                    callsign: (f[1] || '').trim(),
-                    origin_country: f[2],
-                    time_position: f[3], // Unix timestamp of last position update
-                    last_contact: f[4],
-                    longitude: f[5],
-                    latitude: f[6],
-                    altitude: f[7], // meters
-                    velocity: f[9], // m/s
-                    heading: f[10],
-                    vertical_rate: f[11], // m/s
-                    on_ground: f[8],
-                    category: f[17] // Aircraft Category
-                }));
+                .map(f => {
+                    const flightLat = f[6];
+                    const flightLon = f[5];
+                    const distanceMiles = calculateDistance(lat, lon, flightLat, flightLon);
+                    
+                    return {
+                        icao24: f[0],
+                        callsign: (f[1] || '').trim(),
+                        origin_country: f[2],
+                        time_position: f[3], // Unix timestamp of last position update
+                        last_contact: f[4],
+                        longitude: flightLon,
+                        latitude: flightLat,
+                        altitude: f[7], // meters
+                        velocity: f[9], // m/s
+                        heading: f[10],
+                        vertical_rate: f[11], // m/s
+                        on_ground: f[8],
+                        category: f[17], // Aircraft Category
+                        detectedMiles: distanceMiles // Distance from base location in miles
+                    };
+                });
 
             // Filter out private flights if PRIVATE_FLIGHTS=no
             if (FILTER_PRIVATE_FLIGHTS) {
@@ -1617,6 +1631,18 @@ app.get('/api/route/:icao24', async (req, res) => {
         message: 'Enhanced route data not available'
     });
 });
+
+// Haversine Distance Calculation - Calculate distance in miles between two lat/lon points
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 3958.8; // Earth's radius in miles
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Distance in miles
+}
 
 // Configure Node Geocoder with proper User-Agent to comply with OSM usage policy
 const NodeGeocoder = require('node-geocoder');
