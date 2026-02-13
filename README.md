@@ -29,7 +29,7 @@ The system features a **Hybrid API Engine** that balances free live position dat
 * **Private Jet Optimization:** Private jets (EJA, GJS, FBU, etc.) are never cached since they reuse callsigns multiple times per day.
 
 
-* **🛡️ Privacy Filters:** Option to filter out private/GA flights and only show commercial airliners.
+* **🛡️ Privacy Filters:** Option to filter out private/GA flights (N-numbers and private jet operators) to show only commercial airliners. Easily managed via `private_jet_operators.js`.
 * **🎮 UI Controls:** Change API providers on-the-fly using the dropdown selector in the web interface.
 * **🐛 Debug Mode:** Integrated support for ADSBexchange (via RapidAPI) for development when OpenSky is rate-limited.
 
@@ -173,6 +173,47 @@ Access the dashboard at `http://localhost:3005`.
 * `POLL_INTERVAL`: Update frequency in ms (Default: `10000` / 10s). Increase to 30s or 60s to save credits.
 * `*_LOOKUP_ALTITUDE_FEET`: The minimum altitude an aircraft must be at to trigger a paid API lookup. Useful for filtering out landing/departing traffic.
 * `FLIGHTAWARE_COST_CAP`: Maximum monthly spend for FlightAware (Default: `25.00`). Set to `0` to disable FlightAware entirely.
+* `PRIVATE_FLIGHTS`: Set to `no` to exclude private jets and N-number flights (Default: `yes` to show all flights).
+
+### Private Jet Filtering
+
+FlightTrak uses a flexible filtering system with both exclusion and inclusion lists:
+
+**When `PRIVATE_FLIGHTS=no` is set:**
+
+1. **Always Excluded:**
+   - N-number flights (e.g., N12345) - General aviation aircraft
+
+2. **Excluded by Default:**
+   - Private jet operators listed in `private_jet_operators.js`
+   - Examples: NetJets (EJA/EJM), charter companies, corporate flight departments
+
+3. **Inclusion Override:**
+   - Operators listed in `private_jet_inclusion_list.js` are SHOWN even with PRIVATE_FLIGHTS=no
+   - Use this to track specific operators you care about (e.g., NetJets activity)
+   - Default: EJA (NetJets), LXJ (Flexjet)
+
+4. **Always Included:**
+   - All commercial airlines (major airlines, regional carriers, cargo)
+
+**Managing the Lists:**
+
+**Exclusion List** (`private_jet_operators.js`):
+- Contains operators to exclude when PRIVATE_FLIGHTS=no
+- Includes fractional ownership, charter operators, corporate flight departments
+- Do NOT add regional airlines (GoJet, Republic, SkyWest, etc.)
+
+**Inclusion List** (`private_jet_inclusion_list.js`):
+- Contains operators to SHOW even when PRIVATE_FLIGHTS=no
+- Override the exclusion for operators you want to track
+- Example: Track NetJets and Flexjet but exclude other charter operators
+
+To modify:
+1. Edit the appropriate file (`private_jet_operators.js` or `private_jet_inclusion_list.js`)
+2. Add/remove ICAO codes from the array
+3. Restart: `docker-compose restart`
+
+See the files for detailed documentation and examples.
 
 ### API Fallback Logic
 

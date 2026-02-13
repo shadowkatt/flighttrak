@@ -389,12 +389,14 @@ const ENABLE_RETRY = process.env.RETRY === 'YES';
 const RETRY_DELAY_MS = parseInt(process.env.RETRY_DELAY_MS) || 30000;
 const RETRY_MAX_ATTEMPTS = parseInt(process.env.RETRY_MAX_ATTEMPTS) || 2;
 
-// Private Jet/Charter Operators (frequently reuse callsigns throughout the day)
-// These callsigns should NOT be cached when credits are exhausted - use OpenSky only
-const PRIVATE_JET_OPERATORS = new Set([
-    'EJA', 'EJM', 'LXJ', 'FBU', 'GJS', 'XOJ', 'TMC', 'JRE', 'VJT',
-    'MMD', 'CFS', 'EJL', 'VCG', 'FLG', 'JIA', 'CMH', 'N',  // N for N-numbers (though filtered elsewhere)
-]);
+// Private Jet/Charter Operators - Load from external config file
+// These operators are excluded when PRIVATE_FLIGHTS=no
+// They also have special cache behavior (no caching when API credits exhausted)
+const PRIVATE_JET_OPERATORS = require('./private_jet_operators.js');
+
+// Private Jet Inclusion List - Operators to ALLOW even when PRIVATE_FLIGHTS=no
+// This overrides the exclusion for specific operators you want to track
+const PRIVATE_JET_INCLUSION_LIST = require('./private_jet_inclusion_list.js');
 
 // Commercial Airlines ICAO Codes (for filtering private flights)
 // Based on FAA-authorized airline call signs from 123atc.com
@@ -435,7 +437,30 @@ const COMMERCIAL_AIRLINES = new Set([
 function isCommercialFlight(callsign) {
     if (!callsign || callsign.length < 3) return false;
     const prefix = callsign.substring(0, 3).toUpperCase();
-    return COMMERCIAL_AIRLINES.has(prefix);
+    
+    // When PRIVATE_FLIGHTS=no, use EXCLUSION logic with INCLUSION override:
+    // 1. Exclude N-numbers (N12345, etc.)
+    // 2. INCLUDE operators in PRIVATE_JET_INCLUSION_LIST (override)
+    // 3. Exclude operators in PRIVATE_JET_OPERATORS list
+    // 4. Include everything else
+    
+    // Check for N-numbers - always exclude these
+    if (callsign.startsWith('N') && callsign.length > 1 && /\d/.test(callsign[1])) {
+        return false; // N-number = general aviation, always exclude
+    }
+    
+    // Check inclusion list first - these override the exclusion
+    if (PRIVATE_JET_INCLUSION_LIST.has(prefix)) {
+        return true; // On inclusion list, always show
+    }
+    
+    // Check if it's in the private jet exclusion list
+    if (PRIVATE_JET_OPERATORS.has(prefix)) {
+        return false; // Private jet operator, exclude (unless on inclusion list above)
+    }
+    
+    // Everything else is considered "commercial" (includes all airlines, regional, cargo, etc.)
+    return true;
 }
 
 function isPrivateJetOperator(callsign) {
