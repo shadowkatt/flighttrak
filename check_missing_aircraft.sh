@@ -1,54 +1,184 @@
 #!/bin/bash
-# Script to identify aircraft types in logs that aren't in aircraft_types.js
+# Script to scan logs, identify missing aircraft types, and update aircraft_types.js directly.
+
+set -u
+
+CONTAINER_NAME="${1:-flighttrak-flighttrak-1}"
+LOG_TAIL="${LOG_TAIL:-2000}"
+NON_INTERACTIVE="${NON_INTERACTIVE:-0}"
+BASE_TYPES_FILE="public/aircraft_types.js"
+
+upsert_base_type() {
+    local code="$1"
+    local name="$2"
+
+    CODE="$code" NAME="$name" FILE_PATH="$BASE_TYPES_FILE" node <<'NODE'
+const fs = require('fs');
+
+const code = process.env.CODE;
+const name = process.env.NAME;
+const filePath = process.env.FILE_PATH;
+
+let content = fs.readFileSync(filePath, 'utf8');
+const lines = content.split('\n');
+
+const startIdx = lines.findIndex((line) => line.includes('const aircraftTypes = {'));
+if (startIdx === -1) {
+  throw new Error('Could not find "const aircraftTypes = {" in aircraft_types.js');
+}
+
+let endIdx = -1;
+for (let i = startIdx + 1; i < lines.length; i++) {
+  if (lines[i].trim() === '};') {
+    endIdx = i;
+    break;
+  }
+}
+if (endIdx === -1) {
+  throw new Error('Could not find closing "};" for aircraftTypes object');
+}
+
+const escapedName = name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+const newEntryLine = `    '${code}': '${escapedName}',`;
+const entryRegex = new RegExp(`^\\s*'${code}':\\s*'.*?',?\\s*$`);
+
+// Update existing entry if present
+for (let i = startIdx + 1; i < endIdx; i++) {
+  if (entryRegex.test(lines[i])) {
+    lines[i] = newEntryLine;
+    fs.writeFileSync(filePath, `${lines.join('\n').replace(/\n?$/, '\n')}`);
+    process.exit(0);
+  }
+}
+
+// Add new entry before closing brace, fixing trailing comma if needed
+let prevIdx = endIdx - 1;
+while (prevIdx > startIdx && lines[prevIdx].trim() === '') {
+  prevIdx--;
+}
+if (prevIdx > startIdx) {
+  const prevLine = lines[prevIdx];
+  const isComment = prevLine.trim().startsWith('//');
+  if (!isComment && !prevLine.trim().endsWith(',')) {
+    lines[prevIdx] = `${prevLine},`;
+  }
+}
+
+lines.splice(endIdx, 0, newEntryLine);
+fs.writeFileSync(filePath, `${lines.join('\n').replace(/\n?$/, '\n')}`);
+NODE
+}
 
 echo "=== Checking for Unidentified Aircraft Types ==="
 echo ""
+echo "Container: $CONTAINER_NAME"
+echo "Log window: last $LOG_TAIL lines"
+echo ""
 
-# Get aircraft types from logs (using "type" field from FR24 API responses)
 echo "Extracting aircraft types from recent logs..."
-FOUND_TYPES=$(docker logs flighttrak-flighttrak-1 --tail=2000 2>&1 | grep '"type":' | sed -n 's/.*"type": "\([^"]*\)".*/\1/p' | sort -u | grep -v '^$')
+LOG_DATA="$(docker logs "$CONTAINER_NAME" --tail="$LOG_TAIL" 2>&1 || true)"
 
-# Get aircraft types from aircraft_types.js
-echo "Loading known aircraft types from aircraft_types.js..."
-KNOWN_TYPES=$(grep -oE "'[A-Z0-9]+'" public/aircraft_types.js | tr -d "'" | sort -u)
+# Extract from both "type" and "aircraft_type" fields, then keep valid ICAO-like codes only.
+FOUND_TYPES="$(
+    printf '%s\n' "$LOG_DATA" \
+    | rg -o '"(type|aircraft_type)"\s*:\s*"[^"]+"' \
+    | sed -E 's/.*:\s*"([^"]+)"/\1/' \
+    | rg '^[A-Z0-9]{3,5}$' \
+    | sort -u
+)"
 
-# Find missing types
+echo "Loading known aircraft types from $BASE_TYPES_FILE..."
+KNOWN_BASE_TYPES="$(
+    rg -o "^[[:space:]]*'[A-Z0-9]{3,5}'[[:space:]]*:" "$BASE_TYPES_FILE" \
+    | sed -E "s/^[[:space:]]*'([A-Z0-9]{3,5})'.*/\1/" \
+    | sort -u
+)"
+
+KNOWN_TYPES="$KNOWN_BASE_TYPES"
+
+TOTAL_FOUND="$(printf '%s\n' "$FOUND_TYPES" | rg '^[A-Z0-9]{3,5}$' | wc -l | tr -d ' ')"
+TOTAL_KNOWN="$(printf '%s\n' "$KNOWN_TYPES" | rg '^[A-Z0-9]{3,5}$' | wc -l | tr -d ' ')"
+
 echo ""
 echo "=== Aircraft Types Found in Logs ==="
-if [ -z "$FOUND_TYPES" ]; then
+if [ "$TOTAL_FOUND" -eq 0 ]; then
     echo "  (No aircraft types found in recent logs)"
 else
-    echo "$FOUND_TYPES" | while read -r type; do
-        count=$(docker logs flighttrak-flighttrak-1 --tail=2000 2>&1 | grep '"type":' | grep -c "\"$type\"")
+    while IFS= read -r type; do
+        [ -z "$type" ] && continue
+        count="$(printf '%s\n' "$LOG_DATA" | rg -o "\"(type|aircraft_type)\"\\s*:\\s*\"$type\"" | wc -l | tr -d ' ')"
         printf "  %-10s (seen %d times)\n" "$type" "$count"
-    done
+    done <<EOF
+$FOUND_TYPES
+EOF
 fi
 
 echo ""
-echo "=== Missing from aircraft_types.js ==="
+echo "=== Missing from aircraft type database ==="
 MISSING=0
-if [ -n "$FOUND_TYPES" ]; then
-    echo "$FOUND_TYPES" | while read -r type; do
-        if ! echo "$KNOWN_TYPES" | grep -q "^$type$"; then
-            count=$(docker logs flighttrak-flighttrak-1 --tail=2000 2>&1 | grep '"type":' | grep -c "\"$type\"")
+MISSING_CODES=""
+if [ "$TOTAL_FOUND" -gt 0 ]; then
+    while IFS= read -r type; do
+        [ -z "$type" ] && continue
+        if ! printf '%s\n' "$KNOWN_TYPES" | rg -Fxq "$type"; then
+            count="$(printf '%s\n' "$LOG_DATA" | rg -o "\"(type|aircraft_type)\"\\s*:\\s*\"$type\"" | wc -l | tr -d ' ')"
             printf "  %-10s (seen %d times) - NEEDS TO BE ADDED\n" "$type" "$count"
+            MISSING_CODES="${MISSING_CODES}${type}"$'\n'
             MISSING=$((MISSING + 1))
         fi
-    done
+    done <<EOF
+$FOUND_TYPES
+EOF
 fi
 
-if [ $MISSING -eq 0 ]; then
+if [ "$MISSING" -eq 0 ]; then
     echo "  ✓ All aircraft types are identified!"
 fi
 
 echo ""
 echo "=== Summary ==="
-TOTAL_FOUND=$(echo "$FOUND_TYPES" | grep -v '^$' | wc -l | tr -d ' ')
-TOTAL_KNOWN=$(echo "$KNOWN_TYPES" | wc -l | tr -d ' ')
 echo "  Aircraft types in logs: $TOTAL_FOUND"
 echo "  Aircraft types in database: $TOTAL_KNOWN"
+echo "  Missing aircraft types: $MISSING"
+echo "  Mode: $([ "$NON_INTERACTIVE" -eq 1 ] && echo "non-interactive" || echo "interactive")"
 echo ""
-echo "Tip: To see full logs, run: docker logs flighttrak-flighttrak-1 --tail=500 | grep '\"type\":'"
+
+if [ "$MISSING" -gt 0 ] && [ "$NON_INTERACTIVE" -eq 0 ]; then
+    echo "=== Add Missing Aircraft Types ==="
+    ADDED=0
+    SKIPPED=0
+
+    while IFS= read -r code; do
+        [ -z "$code" ] && continue
+        echo ""
+        echo "Missing type: $code"
+        printf "Enter aircraft name for %s (or type 'skip'): " "$code"
+        IFS= read -r name
+
+        if [ -z "$name" ] || [ "$name" = "skip" ] || [ "$name" = "SKIP" ]; then
+            echo "  Skipped $code"
+            SKIPPED=$((SKIPPED + 1))
+            continue
+        fi
+
+        upsert_base_type "$code" "$name"
+        echo "  Added/updated $code -> $name"
+        ADDED=$((ADDED + 1))
+    done <<EOF
+$MISSING_CODES
+EOF
+
+    echo ""
+    echo "=== Update Results ==="
+    echo "  Added: $ADDED"
+    echo "  Skipped: $SKIPPED"
+    echo "  Saved to: $BASE_TYPES_FILE"
+fi
+
+echo "Tip: For report-only mode (no prompts), run:"
+echo "  NON_INTERACTIVE=1 bash check_missing_aircraft.sh"
+echo "Tip: To inspect raw matches, run:"
+echo "  docker logs $CONTAINER_NAME --tail=500 | rg '\"(type|aircraft_type)\"'"
 
 
 

@@ -103,6 +103,7 @@ const aircraftTypes = {
     
     // Business Jets / Corporate Aircraft
     'C68A': 'Cessna Citation Latitude',
+    'CL30': 'Bombardier Challenger 300',
     'CL35': 'Bombardier Challenger 350',
     'CL60': 'Bombardier Challenger 600',
     'LJ35': 'Learjet 35',

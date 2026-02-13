@@ -49,6 +49,7 @@ const PRIVATE_JET_OPERATORS = [
     'EJL',  // Executive Jet Management
     'VCG',  // Volo Aviation
     'FLG',  // Flexjet
+    'LFG',  // LETS JETT
     'CMH',  // Cal-Western Aviation
     
     // === Private Charter Companies (from recent airline additions) ===
