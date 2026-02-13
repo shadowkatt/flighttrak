@@ -115,11 +115,13 @@ const aircraftTypes = {
     'GLF4': 'Gulfstream IV',
     'GLF5': 'Gulfstream V',
     'GLF6': 'Gulfstream G650',
+    'GL5T': 'Gulfstream G500/G550',
     'F2TH': 'Dassault Falcon 2000',
     'FA7X': 'Dassault Falcon 7X',
     'H25B': 'Hawker 800XP',
     'E55P': 'Embraer Phenom 300',
     'E545': 'Embraer Legacy 450',
+    'E550': 'Embraer Phenom 300E',
     'PC12': 'Pilatus PC-12',
     
     // Airbus A220 (formerly Bombardier CSeries)

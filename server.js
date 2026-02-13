@@ -384,6 +384,11 @@ const PRIVATE_FLIGHTS = process.env.PRIVATE_FLIGHTS ?
     process.env.PRIVATE_FLIGHTS.toLowerCase() : 'yes';
 const FILTER_PRIVATE_FLIGHTS = PRIVATE_FLIGHTS === 'no';
 
+// Retry configuration for FR24 lookups (reduces FA fallback usage)
+const ENABLE_RETRY = process.env.RETRY === 'YES';
+const RETRY_DELAY_MS = parseInt(process.env.RETRY_DELAY_MS) || 30000;
+const RETRY_MAX_ATTEMPTS = parseInt(process.env.RETRY_MAX_ATTEMPTS) || 2;
+
 // Private Jet/Charter Operators (frequently reuse callsigns throughout the day)
 // These callsigns should NOT be cached when credits are exhausted - use OpenSky only
 const PRIVATE_JET_OPERATORS = new Set([
@@ -672,6 +677,11 @@ let fr24Cache = new Map();
 const FR24_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
 
 // List of major airline ICAO codes to prioritize for FlightAware lookups
+// Helper function for retry delays
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 // Calculate distance between two points (Haversine formula)
 function calculateDistance(lat1, lon1, lat2, lon2) {
     const R = 3958.8; // Earth's radius in miles
@@ -748,6 +758,45 @@ function shouldLookupFlightradar24(callsign, flight) {
     }
 
     return true;
+}
+
+// Retry wrapper for FR24 lookups - reduces FA fallback by waiting for FR24 data to populate
+async function fetchFR24WithRetry(callsign, flight) {
+    const attempts = ENABLE_RETRY ? RETRY_MAX_ATTEMPTS : 1;
+    
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        if (attempts > 1) {
+            console.log(`[Route Request] FR24 attempt ${attempt}/${attempts} for ${callsign}`);
+        }
+        
+        const result = await getFlightradar24FlightInfo(callsign, flight);
+        
+        // Check if we got valid data
+        if (result.success && result.data) {
+            if (attempt > 1) {
+                console.log(`[Route Request] ✅ FR24 succeeded on attempt ${attempt} for ${callsign}`);
+            }
+            return result;
+        }
+        
+        // Check reason for failure - don't retry if filtered, rate limited, or disabled
+        const noRetryReasons = ['filtered', 'rate_limit', 'disabled', 'unavailable', 'cache'];
+        if (noRetryReasons.includes(result.reason)) {
+            console.log(`[Route Request] FR24 ${result.reason} for ${callsign} - no retry needed`);
+            return result;
+        }
+        
+        // No data returned, check if we should retry
+        if (attempt < attempts) {
+            console.log(`[Route Request] ⏳ FR24 no data for ${callsign}, waiting ${RETRY_DELAY_MS}ms before retry...`);
+            await sleep(RETRY_DELAY_MS);
+        } else {
+            console.log(`[Route Request] ❌ FR24 failed after ${attempts} attempt(s) for ${callsign}`);
+        }
+    }
+    
+    // All attempts failed
+    return { success: false, reason: 'no_data', data: null };
 }
 
 async function getFlightAwareFlightInfo(ident, flight) {
@@ -1559,7 +1608,7 @@ app.get('/api/route/:icao24', async (req, res) => {
         // Step 1: Try primary API
         if (ACTIVE_ENHANCED_PROVIDER === 'flightradar24' && isFR24Available()) {
             console.log(`[Route Request] Trying FR24 (primary)...`);
-            primaryResult = await getFlightradar24FlightInfo(callsign, flightForLookup);
+            primaryResult = await fetchFR24WithRetry(callsign, flightForLookup);
             if (primaryResult.success) {
                 routeData = primaryResult.data;
             }
@@ -1878,6 +1927,8 @@ async function startServer() {
     console.log('\n=== FlightTrak Configuration ===');
     console.log(`Search Radius: ${SEARCH_RADIUS_MILES} miles`);
     console.log(`Poll Interval: ${process.env.POLL_INTERVAL || 10000}ms`);
+    console.log(`Private Flights Filter: ${FILTER_PRIVATE_FLIGHTS ? 'YES (commercial only)' : 'NO (all flights)'}`);
+    console.log(`FR24 Retry: ${ENABLE_RETRY ? `YES (${RETRY_MAX_ATTEMPTS} attempts, ${RETRY_DELAY_MS}ms delay)` : 'NO (immediate fallback)'}`);
     console.log('\n--- API Providers ---');
     console.log(`OpenSky Network: ✓ ALWAYS ENABLED (free)`);
     console.log('\n--- Enhanced Data Provider (ONE ACTIVE) ---');

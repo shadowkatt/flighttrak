@@ -111,7 +111,26 @@ const airlines = {
     'EXS': 'Jet2',
     'GWI': 'Eurowings',
     'RBA': 'Royal Brunei',
-    'FBU': 'French Bee'
+    'FBU': 'French Bee',
+    
+    // Private Aviation & Charter Operators
+    'BVR': 'ACM Air Charter',
+    'EJM': 'NetJets Management',
+    'ERY': 'Sky Quest',
+    'JRE': 'Jet Share',
+    'JTL': 'Jet Linx Aviation',
+    'KFB': 'STAjets',
+    'KOW': 'Baker Aviation',
+    'MJS': 'JET SAVER',
+    'RKJ': 'Charter Airlines',
+    'RNI': 'Rennia Aviation',
+    'SGX': 'Slate Aviation',
+    'TCN': 'BellAir',
+    'TFF': 'Talon Air',
+    'TWY': 'Sunset Aviation',
+    'VJT': 'VistaJet',
+    'XAA': 'Centene Corporation',
+    'XFL': 'EX-FLIGHT'
 };
 
 function getAirlineName(icao) {
