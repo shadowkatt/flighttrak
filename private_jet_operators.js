@@ -38,6 +38,7 @@ const PRIVATE_JET_OPERATORS = [
     'EJM',  // NetJets Management
     'LXJ',  // Flexjet
     'VJT',  // VistaJet
+    'VJA',  // Vista America
     'JRE',  // Jet Share
     
     // === Charter Operators ===

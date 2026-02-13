@@ -33,7 +33,8 @@
 
 const PRIVATE_JET_INCLUSION_LIST = [
     'EJA',  // NetJets Aviation
-    'LXJ'   // Flexjet
+    'LXJ',  // Flexjet
+    'VJA'   // Vista America / VistaJet (showed up in logs with route data)
 ];
 
 // Export as a Set for efficient lookup
