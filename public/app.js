@@ -40,6 +40,11 @@ function getAirlineLogo(callsign) {
     // Assume first 3 chars are ICAO airline code (e.g., UAL from UAL123)
     const airlineCode = callsign.substring(0, 3).toUpperCase();
     
+    // Check for local logo overrides first (defined in data.js)
+    if (typeof logoOverrides !== 'undefined' && logoOverrides[airlineCode]) {
+        return logoOverrides[airlineCode];
+    }
+    
     // Special cases: Use flightaware_logos for better quality on specific airlines
     const useFlightAwareLogos = ['ASA', 'EJA', 'APZ']; // Alaska Airlines, NetJets, Air Premia
     const logoFolder = useFlightAwareLogos.includes(airlineCode) ? 'flightaware_logos' : 'radarbox_logos';

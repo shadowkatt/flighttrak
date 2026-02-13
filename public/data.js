@@ -139,3 +139,28 @@ function getAirlineName(icao) {
     return airlines[prefix] || icao;
 }
 
+// Logo Override Configuration
+const logoOverrides = {
+    // JetBlue - Brighter logo for better visibility
+    'JBU': 'logos/JBU.jpg',
+    
+    // El Al - Brighter logo for better visibility
+    'ELY': 'logos/ELY.jpg'
+};
+
+function getAirlineLogo(icao) {
+    if (!icao || icao.length < 2) return null;
+    
+    // Extract first 3 chars for airline code (handles callsigns like "JBU123")
+    const airlineCode = icao.substring(0, 3).toUpperCase();
+    
+    // Check for local override first
+    if (logoOverrides[airlineCode]) {
+        return logoOverrides[airlineCode];
+    }
+    
+    // Fall back to GitHub CDN
+    const cdnBase = 'https://raw.githubusercontent.com/sexym0nk3y/airline-logos/main/logos';
+    return `${cdnBase}/${airlineCode}.png`;
+}
+
