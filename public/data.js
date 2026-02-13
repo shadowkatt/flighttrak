@@ -146,7 +146,10 @@ const logoOverrides = {
     'JBU': 'logos/JBU.jpg',
     
     // El Al - Brighter logo for better visibility
-    'ELY': 'logos/ELY.jpg'
+    'ELY': 'logos/ELY.jpg',
+    
+    // Porter Airlines - Custom logo for better visibility
+    'PTR': 'logos/PTR.png'
 };
 
 function getAirlineLogo(icao) {
