@@ -115,6 +115,7 @@ const airlines = {
     
     // Private Aviation & Charter Operators
     'BVR': 'ACM Air Charter',
+    'CNS': 'Cobalt Air',
     'EJM': 'NetJets Management',
     'ERY': 'Sky Quest',
     'JRE': 'Jet Share',
@@ -163,4 +164,3 @@ function getAirlineLogo(icao) {
     const cdnBase = 'https://raw.githubusercontent.com/sexym0nk3y/airline-logos/main/logos';
     return `${cdnBase}/${airlineCode}.png`;
 }
-

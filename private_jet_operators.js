@@ -53,6 +53,7 @@ const PRIVATE_JET_OPERATORS = [
     
     // === Private Charter Companies (from recent airline additions) ===
     'BVR',  // ACM Air Charter
+    'CNS',  // Cobalt Air
     'ERY',  // Sky Quest
     'JTL',  // Jet Linx Aviation
     'KFB',  // STAjets
