@@ -3,7 +3,84 @@ const axios = require('axios');
 const cors = require('cors');
 const fs = require('fs').promises;
 const path = require('path');
+const pino = require('pino');
 require('dotenv').config();
+
+const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
+const LOG_PRETTY = (process.env.LOG_PRETTY || 'true').toLowerCase() === 'true';
+const logger = pino(
+    { level: LOG_LEVEL },
+    LOG_PRETTY
+        ? pino.transport({
+              target: 'pino-pretty',
+              options: {
+                  colorize: true,
+                  translateTime: 'SYS:standard',
+                  singleLine: true
+              }
+          })
+        : undefined
+);
+
+function logWithPino(level, args) {
+    if (!args || args.length === 0) return;
+
+    const isPlainObject = (value) =>
+        value !== null &&
+        typeof value === 'object' &&
+        !Array.isArray(value) &&
+        !(value instanceof Error);
+
+    const splitMetaAndExtra = (values) => {
+        const meta = {};
+        const extra = [];
+        values.forEach((value) => {
+            if (value instanceof Error) {
+                meta.err = value;
+            } else if (isPlainObject(value)) {
+                Object.assign(meta, value);
+            } else {
+                extra.push(value);
+            }
+        });
+        return { meta, extra };
+    };
+
+    const [first, ...rest] = args;
+    if (typeof first === 'string') {
+        if (rest.length === 0) {
+            logger[level](first);
+        } else {
+            const { meta, extra } = splitMetaAndExtra(rest);
+            if (extra.length > 0) {
+                meta.args = extra;
+            }
+            logger[level](meta, first);
+        }
+        return;
+    }
+
+    if (first instanceof Error) {
+        const { meta, extra } = splitMetaAndExtra(rest);
+        meta.err = first;
+        if (extra.length > 0) {
+            meta.args = extra;
+        }
+        logger[level](meta, 'Error');
+        return;
+    }
+
+    const { meta, extra } = splitMetaAndExtra(args);
+    if (extra.length > 0) {
+        meta.args = extra;
+    }
+    logger[level](meta, 'Log');
+}
+
+console.log = (...args) => logWithPino('info', args);
+console.info = (...args) => logWithPino('info', args);
+console.warn = (...args) => logWithPino('warn', args);
+console.error = (...args) => logWithPino('error', args);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -369,6 +446,11 @@ const FLIGHTRADAR24_BASE_URL = 'https://fr24api.flightradar24.com/api';
 const FLIGHTRADAR24_ENABLED = !!process.env.FLIGHTRADAR24_API_KEY;
 const FLIGHTRADAR24_LOOKUP_ALTITUDE_FEET = parseInt(process.env.FLIGHTRADAR24_LOOKUP_ALTITUDE_FEET) || 2000;
 
+// adsb.lol Route API (free backup route enrichment)
+const ADSBLOL_ENABLED = (process.env.ADSBLOL_ENABLED || 'yes').toLowerCase() !== 'no';
+const ADSBLOL_ROUTESET_URL = 'https://api.adsb.lol/api/0/routeset';
+const ADSBLOL_TIMEOUT_MS = parseInt(process.env.ADSBLOL_TIMEOUT_MS) || 5000;
+
 // ADSBexchange API Client (via RapidAPI) - TEMPORARY for debugging during OpenSky backoff
 const ADSBEXCHANGE_ENABLED = process.env.USE_ADSB === 'true' && !!process.env.RAPIDAPI_KEY;
 const ADSBEXCHANGE_BASE_URL = 'https://adsbexchange-com1.p.rapidapi.com';
@@ -383,11 +465,7 @@ const HYBRID_SWITCH_THRESHOLD = 5.00; // Switch to FR24 when FA cost reaches $5
 const PRIVATE_FLIGHTS = process.env.PRIVATE_FLIGHTS ?
     process.env.PRIVATE_FLIGHTS.toLowerCase() : 'yes';
 const FILTER_PRIVATE_FLIGHTS = PRIVATE_FLIGHTS === 'no';
-
-// Retry configuration for FR24 lookups (reduces FA fallback usage)
-const ENABLE_RETRY = process.env.RETRY === 'YES';
-const RETRY_DELAY_MS = parseInt(process.env.RETRY_DELAY_MS) || 30000;
-const RETRY_MAX_ATTEMPTS = parseInt(process.env.RETRY_MAX_ATTEMPTS) || 2;
+const ASSUME_UNKNOWN_PREFIX_PRIVATE = (process.env.ASSUME_UNKNOWN_PREFIX_PRIVATE || 'yes').toLowerCase() === 'yes';
 
 // Private Jet/Charter Operators - Load from external config file
 // These operators are excluded when PRIVATE_FLIGHTS=no
@@ -458,6 +536,11 @@ function isCommercialFlight(callsign) {
     if (PRIVATE_JET_OPERATORS.has(prefix)) {
         return false; // Private jet operator, exclude (unless on inclusion list above)
     }
+
+    // Optional strict mode: if prefix isn't in known commercial list, treat as private
+    if (ASSUME_UNKNOWN_PREFIX_PRIVATE && !COMMERCIAL_AIRLINES.has(prefix)) {
+        return false;
+    }
     
     // Everything else is considered "commercial" (includes all airlines, regional, cargo, etc.)
     return true;
@@ -473,8 +556,22 @@ function isPrivateJetOperator(callsign) {
     if (callsign.startsWith('N') && callsign.length > 1 && /\d/.test(callsign[1])) {
         return true;
     }
+
+    // Inclusion list always overrides private classification
+    if (PRIVATE_JET_INCLUSION_LIST.has(airlineCode)) {
+        return false;
+    }
+
+    if (PRIVATE_JET_OPERATORS.has(airlineCode)) {
+        return true;
+    }
+
+    // Optional strict mode: if prefix isn't in known commercial list, treat as private
+    if (ASSUME_UNKNOWN_PREFIX_PRIVATE && !COMMERCIAL_AIRLINES.has(airlineCode)) {
+        return true;
+    }
     
-    return PRIVATE_JET_OPERATORS.has(airlineCode);
+    return false;
 }
 
 // Check if FR24 API is available (has credits and enabled)
@@ -702,10 +799,6 @@ let fr24Cache = new Map();
 const FR24_CACHE_TTL = 4 * 60 * 60 * 1000; // 4 hours
 
 // List of major airline ICAO codes to prioritize for FlightAware lookups
-// Helper function for retry delays
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
 
 // Calculate distance between two points (Haversine formula)
 function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -783,45 +876,6 @@ function shouldLookupFlightradar24(callsign, flight) {
     }
 
     return true;
-}
-
-// Retry wrapper for FR24 lookups - reduces FA fallback by waiting for FR24 data to populate
-async function fetchFR24WithRetry(callsign, flight) {
-    const attempts = ENABLE_RETRY ? RETRY_MAX_ATTEMPTS : 1;
-    
-    for (let attempt = 1; attempt <= attempts; attempt++) {
-        if (attempts > 1) {
-            console.log(`[Route Request] FR24 attempt ${attempt}/${attempts} for ${callsign}`);
-        }
-        
-        const result = await getFlightradar24FlightInfo(callsign, flight);
-        
-        // Check if we got valid data
-        if (result.success && result.data) {
-            if (attempt > 1) {
-                console.log(`[Route Request] ✅ FR24 succeeded on attempt ${attempt} for ${callsign}`);
-            }
-            return result;
-        }
-        
-        // Check reason for failure - don't retry if filtered, rate limited, or disabled
-        const noRetryReasons = ['filtered', 'rate_limit', 'disabled', 'unavailable', 'cache'];
-        if (noRetryReasons.includes(result.reason)) {
-            console.log(`[Route Request] FR24 ${result.reason} for ${callsign} - no retry needed`);
-            return result;
-        }
-        
-        // No data returned, check if we should retry
-        if (attempt < attempts) {
-            console.log(`[Route Request] ⏳ FR24 no data for ${callsign}, waiting ${RETRY_DELAY_MS}ms before retry...`);
-            await sleep(RETRY_DELAY_MS);
-        } else {
-            console.log(`[Route Request] ❌ FR24 failed after ${attempts} attempt(s) for ${callsign}`);
-        }
-    }
-    
-    // All attempts failed
-    return { success: false, reason: 'no_data', data: null };
 }
 
 async function getFlightAwareFlightInfo(ident, flight) {
@@ -1184,6 +1238,178 @@ async function getFlightradar24FlightInfo(callsign, flight) {
         }
         return { success: false, reason: 'error', data: null };
     }
+}
+
+async function getAdsbLolFlightDetails(callsign) {
+    const empty = { registration: null, aircraft_type: null };
+    if (!ADSBLOL_ENABLED || !callsign) return empty;
+
+    try {
+        const encodedCallsign = encodeURIComponent(callsign.trim());
+        const callsignUrl = `https://api.adsb.lol/v2/callsign/${encodedCallsign}`;
+        const startCallsign = Date.now();
+        const callsignResponse = await axios.get(callsignUrl, {
+            headers: { 'accept': 'application/json' },
+            timeout: ADSBLOL_TIMEOUT_MS
+        });
+        logAPI('adsb.lol', 'GET', `/v2/callsign/${callsign}`, callsignResponse.status, Date.now() - startCallsign);
+        console.log(`[adsb.lol] Callsign response for ${callsign}:`, JSON.stringify(callsignResponse.data).substring(0, 500));
+
+        const ac = Array.isArray(callsignResponse.data?.ac) ? callsignResponse.data.ac : [];
+        const first = ac[0] || {};
+        const registration = first.r || null;
+        const callsignType = first.t || null;
+
+        if (!registration) {
+            return { registration: null, aircraft_type: callsignType };
+        }
+
+        const encodedReg = encodeURIComponent(registration);
+        const regUrl = `https://api.adsb.lol/v2/reg/${encodedReg}`;
+        const startReg = Date.now();
+        const regResponse = await axios.get(regUrl, {
+            headers: { 'accept': 'application/json' },
+            timeout: ADSBLOL_TIMEOUT_MS
+        });
+        logAPI('adsb.lol', 'GET', `/v2/reg/${registration}`, regResponse.status, Date.now() - startReg);
+        console.log(`[adsb.lol] Reg response for ${registration}:`, JSON.stringify(regResponse.data).substring(0, 500));
+
+        const regAc = Array.isArray(regResponse.data?.ac) ? regResponse.data.ac : [];
+        const regFirst = regAc[0] || {};
+        const regType = regFirst.t || null;
+
+        return {
+            registration,
+            aircraft_type: regType || callsignType || null
+        };
+    } catch (error) {
+        const status = error.response?.status;
+        if (status) {
+            console.error(`[adsb.lol] Flight detail lookup error for ${callsign}: ${status} - ${error.response.statusText}`);
+            if (error.response?.data) {
+                console.error('[adsb.lol] Flight detail error response:', JSON.stringify(error.response.data));
+            }
+        } else {
+            console.error(`[adsb.lol] Flight detail lookup error for ${callsign}:`, error.message);
+        }
+        return empty;
+    }
+}
+
+async function getAdsbLolRouteInfo(callsign, flight) {
+    if (!ADSBLOL_ENABLED || !callsign) return { success: false, reason: 'disabled', data: null };
+
+    const flightDetails = await getAdsbLolFlightDetails(callsign);
+    const registration = flightDetails.registration || null;
+    const aircraftType = flightDetails.aircraft_type || null;
+
+    let route = null;
+    let origin = null;
+    let destination = null;
+    let airlineCode = callsign.substring(0, 3).toUpperCase();
+
+    try {
+        const lat = Number.isFinite(flight?.latitude) ? flight.latitude : 0;
+        const lng = Number.isFinite(flight?.longitude) ? flight.longitude : 0;
+        const payload = { planes: [{ callsign, lat, lng }] };
+
+        const startTime = Date.now();
+        const response = await axios.post(ADSBLOL_ROUTESET_URL, payload, {
+            headers: {
+                'accept': 'application/json',
+                'content-type': 'application/json'
+            },
+            timeout: ADSBLOL_TIMEOUT_MS
+        });
+        const duration = Date.now() - startTime;
+        logAPI('adsb.lol', 'POST', '/api/0/routeset', response.status, duration);
+        console.log(`[adsb.lol] Response for ${callsign}:`, JSON.stringify(response.data).substring(0, 500));
+
+        if (Array.isArray(response.data) && response.data.length > 0) {
+            route = response.data[0] || {};
+        }
+    } catch (error) {
+        const status = error.response?.status;
+        if (status) {
+            console.error(`[adsb.lol] Route lookup error for ${callsign}: ${status} - ${error.response.statusText}`);
+            if (error.response?.data) {
+                console.error('[adsb.lol] Route lookup error response:', JSON.stringify(error.response.data));
+            }
+        } else {
+            console.error(`[adsb.lol] Route lookup error for ${callsign}:`, error.message);
+        }
+    }
+
+    if (route) {
+        if (route.plausible === 0) {
+            console.log(`[adsb.lol] Route data for ${callsign} marked implausible`);
+        } else {
+            if (typeof route.airport_codes === 'string' && route.airport_codes.includes('-')) {
+                const [orig, dest] = route.airport_codes.split('-');
+                origin = orig || null;
+                destination = dest || null;
+            }
+
+            if ((!origin || !destination) && Array.isArray(route._airports) && route._airports.length >= 2) {
+                origin = origin || route._airports[0]?.icao || null;
+                destination = destination || route._airports[1]?.icao || null;
+            }
+        }
+
+        if (route.airline_code) {
+            airlineCode = route.airline_code;
+        }
+    }
+
+    if (!origin && !destination && !aircraftType) {
+        console.log(`[adsb.lol] No usable route/type data for ${callsign}`);
+        return { success: false, reason: 'no_data', data: null };
+    }
+
+    const result = {
+        origin,
+        destination,
+        aircraft_type: aircraftType,
+        airline: null,
+        airline_logo_code: airlineCode,
+        aircraft_registration: registration,
+        departure_time: null,
+        source: 'adsblol'
+    };
+    console.log(
+        `[adsb.lol] Route/type for ${callsign}: ${origin || 'Unknown'} -> ${destination || 'Unknown'} ` +
+        `(airline_code: ${airlineCode}, reg: ${registration || 'Unknown'}, type: ${aircraftType || 'Unknown'}, plausible: ${route?.plausible ?? 'n/a'})`
+    );
+
+    // Save to caches (without departure_time - cache is for route info only)
+    const cacheResult = {
+        origin: result.origin,
+        destination: result.destination,
+        aircraft_type: result.aircraft_type,
+        airline: result.airline,
+        airline_logo_code: result.airline_logo_code,
+        aircraft_registration: result.aircraft_registration,
+        source: result.source
+    };
+
+    // Always save to 5-min dedup cache (prevents duplicate API calls)
+    saveRecentLookup(callsign, cacheResult);
+
+    // Only persist to 7-day cache for commercial flights (private jets reuse callsigns)
+    if (!isPrivateJetOperator(callsign)) {
+        const shouldPersistCache =
+            apiCosts.flightradar24_credits_remaining < 5000 ||
+            apiCosts.flightaware > 20;
+
+        if (shouldPersistCache) {
+            await cacheFlightData(callsign, cacheResult);
+            console.log(`[adsb.lol] 💾 Cached ${callsign} (approaching limits: FR24=${apiCosts.flightradar24_credits_remaining}, FA=$${apiCosts.flightaware.toFixed(2)})`);
+        }
+    } else {
+        console.log(`[adsb.lol] 🚁 ${callsign} is private jet - NOT cached (callsign reused)`);
+    }
+
+    return { success: true, reason: 'api', data: { ...result, from_cache: false } };
 }
 
 async function getOpenSkyToken() {
@@ -1625,53 +1851,69 @@ app.get('/api/route/:icao24', async (req, res) => {
         console.log(`[Route Request] WARNING: ${callsign || icao24} has invalid/missing altitude (${altitude}). Will fall back to OpenSky.`);
     }
 
-    // NEW SIMPLIFIED LOGIC: Try both APIs, then cache as last resort
+    // Route logic:
+    // - Private flights: adsb.lol ONLY (no FR24/FA usage)
+    // - Non-private flights: active provider -> backup(s) -> cache
     if (callsign && callsign.length > 2) {
+        const isPrivateCallsign = isPrivateJetOperator(callsign);
         let primaryResult = null;
         let secondaryResult = null;
-        
-        // Step 1: Try primary API
-        if (ACTIVE_ENHANCED_PROVIDER === 'flightradar24' && isFR24Available()) {
-            console.log(`[Route Request] Trying FR24 (primary)...`);
-            primaryResult = await fetchFR24WithRetry(callsign, flightForLookup);
-            if (primaryResult.success) {
-                routeData = primaryResult.data;
-            }
-        } else if (ACTIVE_ENHANCED_PROVIDER === 'flightaware' && isFAAvailable()) {
-            console.log(`[Route Request] Trying FA (primary)...`);
-            primaryResult = await getFlightAwareFlightInfo(callsign, flightForLookup);
-            if (primaryResult.success) {
-                routeData = primaryResult.data;
-            }
-        }
-        
-        // Step 2: If primary returned no data, try secondary API (but ONLY if primary didn't filter it out)
-        if (!routeData && primaryResult && primaryResult.reason !== 'filtered') {
-            if (ACTIVE_ENHANCED_PROVIDER === 'flightradar24' && isFAAvailable()) {
-                console.log(`[Route Request] FR24 returned no data (${primaryResult.reason}), trying FA (secondary)...`);
-                secondaryResult = await getFlightAwareFlightInfo(callsign, flightForLookup);
-                if (secondaryResult.success) {
-                    routeData = secondaryResult.data;
-                }
-            } else if (ACTIVE_ENHANCED_PROVIDER === 'flightaware' && isFR24Available()) {
-                console.log(`[Route Request] FA returned no data (${primaryResult.reason}), trying FR24 (secondary)...`);
-                secondaryResult = await getFlightradar24FlightInfo(callsign, flightForLookup);
-                if (secondaryResult.success) {
-                    routeData = secondaryResult.data;
-                }
-            }
-        } else if (!routeData && primaryResult && primaryResult.reason === 'filtered') {
-            console.log(`[Route Request] ⛔ ${callsign} filtered by primary API (altitude/distance) - skipping secondary (same filters)`);
-        }
-        
-        // Step 3: LAST RESORT - If BOTH APIs unavailable/failed, check persistent cache
-        if (!routeData && !isFR24Available() && !isFAAvailable()) {
-            console.log(`[Route Request] 🚨 BOTH APIs unavailable - checking cache as last resort`);
-            
-            // For private jets: skip cache, return null (OpenSky only)
-            if (isPrivateJetOperator(callsign)) {
-                console.log(`[Route Request] 🚁 ${callsign} is private jet - NO CACHE (OpenSky only)`);
+
+        // Private flights never hit paid APIs - use adsb.lol only
+        if (isPrivateCallsign) {
+            console.log(`[Route Request] 🚁 ${callsign} identified as private - trying adsb.lol only`);
+            const privateResult = await getAdsbLolRouteInfo(callsign, flightForLookup);
+            if (privateResult.success) {
+                routeData = privateResult.data;
             } else {
+                console.log(`[Route Request] adsb.lol returned no data (${privateResult.reason}) for private flight ${callsign}`);
+            }
+        } else {
+            // Step 1: Try primary API
+            if (ACTIVE_ENHANCED_PROVIDER === 'flightradar24' && isFR24Available()) {
+                console.log(`[Route Request] Trying FR24 (primary)...`);
+                primaryResult = await getFlightradar24FlightInfo(callsign, flightForLookup);
+                if (primaryResult.success) {
+                    routeData = primaryResult.data;
+                }
+            } else if (ACTIVE_ENHANCED_PROVIDER === 'flightaware' && isFAAvailable()) {
+                console.log(`[Route Request] Trying FA (primary)...`);
+                primaryResult = await getFlightAwareFlightInfo(callsign, flightForLookup);
+                if (primaryResult.success) {
+                    routeData = primaryResult.data;
+                }
+            }
+
+            // Step 2: If primary failed for any reason, try backups
+            if (!routeData && primaryResult) {
+                if (ACTIVE_ENHANCED_PROVIDER === 'flightradar24') {
+                    console.log(`[Route Request] FR24 returned ${primaryResult.reason}, trying adsb.lol (secondary)...`);
+                    secondaryResult = await getAdsbLolRouteInfo(callsign, flightForLookup);
+                    if (secondaryResult.success) {
+                        routeData = secondaryResult.data;
+                    }
+
+                    // adsb.lol didn't resolve route - fallback to FlightAware as tertiary
+                    if (!routeData && isFAAvailable()) {
+                        console.log(`[Route Request] adsb.lol returned no data (${secondaryResult.reason}), trying FA (tertiary)...`);
+                        const tertiaryResult = await getFlightAwareFlightInfo(callsign, flightForLookup);
+                        if (tertiaryResult.success) {
+                            routeData = tertiaryResult.data;
+                        }
+                    }
+                } else if (ACTIVE_ENHANCED_PROVIDER === 'flightaware' && isFR24Available()) {
+                    console.log(`[Route Request] FA returned no data (${primaryResult.reason}), trying FR24 (secondary)...`);
+                    secondaryResult = await getFlightradar24FlightInfo(callsign, flightForLookup);
+                    if (secondaryResult.success) {
+                        routeData = secondaryResult.data;
+                    }
+                }
+            }
+
+            // Step 3: LAST RESORT - If BOTH APIs unavailable/failed, check persistent cache
+            if (!routeData && !isFR24Available() && !isFAAvailable()) {
+                console.log(`[Route Request] 🚨 BOTH APIs unavailable - checking cache as last resort`);
+
                 // For commercial flights: check persistent cache
                 console.log(`[Route Request] 📦 Checking 7-day cache for ${callsign}`);
                 const cachedData = await getCachedFlightData(callsign);
@@ -1953,7 +2195,6 @@ async function startServer() {
     console.log(`Search Radius: ${SEARCH_RADIUS_MILES} miles`);
     console.log(`Poll Interval: ${process.env.POLL_INTERVAL || 10000}ms`);
     console.log(`Private Flights Filter: ${FILTER_PRIVATE_FLIGHTS ? 'YES (commercial only)' : 'NO (all flights)'}`);
-    console.log(`FR24 Retry: ${ENABLE_RETRY ? `YES (${RETRY_MAX_ATTEMPTS} attempts, ${RETRY_DELAY_MS}ms delay)` : 'NO (immediate fallback)'}`);
     console.log('\n--- API Providers ---');
     console.log(`OpenSky Network: ✓ ALWAYS ENABLED (free)`);
     console.log('\n--- Enhanced Data Provider (ONE ACTIVE) ---');

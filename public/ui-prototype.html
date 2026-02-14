@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FlightTrak UI Prototype</title>
+  <link rel="stylesheet" href="ui-prototype.css" />
+</head>
+<body>
+  <header class="prototype-header">
+    <div class="brand">
+      <div class="brand-dot" aria-hidden="true"></div>
+      <div>
+        <h1>FLIGHTTRAK PROTOTYPE</h1>
+        <p>Static concept - non-functional</p>
+      </div>
+    </div>
+    <div class="header-meta">
+      <span class="pill">Desktop concept</span>
+      <span class="pill">No live data</span>
+    </div>
+  </header>
+
+  <main class="prototype-main">
+    <section class="metric-grid">
+      <article class="metric-card">
+        <div class="metric-top">
+          <span class="icon">RAD</span>
+          <span class="label">OpenSky</span>
+        </div>
+        <div class="value">Healthy</div>
+        <div class="sub">3,912 / 4,000 daily</div>
+      </article>
+
+      <article class="metric-card">
+        <div class="metric-top">
+          <span class="icon">FR24</span>
+          <span class="label">FR24 Credits</span>
+        </div>
+        <div class="value">14,889</div>
+        <div class="sub">Remaining this cycle</div>
+      </article>
+
+      <article class="metric-card">
+        <div class="metric-top">
+          <span class="icon">FA</span>
+          <span class="label">FlightAware Spend</span>
+        </div>
+        <div class="value">$7.15 / $25.00</div>
+        <div class="sub">28.6% of budget</div>
+      </article>
+
+      <article class="metric-card">
+        <div class="metric-top">
+          <span class="icon">FLT</span>
+          <span class="label">Flights Tracked</span>
+        </div>
+        <div class="value">27</div>
+        <div class="sub">Last 6 hours</div>
+      </article>
+    </section>
+
+    <section class="chart-grid">
+      <article class="chart-card">
+        <h2>Traffic Per Hour</h2>
+        <div class="chart chart-line">
+          <div class="mock-line"></div>
+        </div>
+        <p class="chart-note">Prototype sparkline area with trend highlight.</p>
+      </article>
+
+      <article class="chart-card">
+        <h2>FR24 Credits Remaining</h2>
+        <div class="chart chart-area">
+          <div class="mock-area"></div>
+        </div>
+        <p class="chart-note">Prototype depletion curve through billing cycle.</p>
+      </article>
+
+      <article class="chart-card">
+        <h2>FA Spend vs Cap</h2>
+        <div class="chart chart-bars">
+          <div class="bar b1"></div>
+          <div class="bar b2"></div>
+          <div class="bar b3"></div>
+          <div class="bar b4"></div>
+          <div class="bar b5"></div>
+          <div class="bar b6"></div>
+        </div>
+        <p class="chart-note">Prototype budget bars with warning threshold marker.</p>
+      </article>
+    </section>
+
+    <section class="layout-note">
+      <h3>Implementation Notes</h3>
+      <p>
+        This page is intentionally disconnected from current `index.html` / `app.js`. It is a visual-only
+        draft to evaluate icon cards and chart positioning without affecting production behavior.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

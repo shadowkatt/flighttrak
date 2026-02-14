@@ -103,6 +103,7 @@ const aircraftTypes = {
     
     // Business Jets / Corporate Aircraft
     'C68A': 'Cessna Citation Latitude',
+    'C208': 'Cessna 208 Caravan',
     'CL30': 'Bombardier Challenger 300',
     'CL35': 'Bombardier Challenger 350',
     'CL60': 'Bombardier Challenger 600',
@@ -117,9 +118,12 @@ const aircraftTypes = {
     'GLF5': 'Gulfstream V',
     'GLF6': 'Gulfstream G650',
     'GL5T': 'Gulfstream G500/G550',
+    'GL7T': 'Bombardier Global 7500',
+    'GALX': 'Gulfstream G200',
     'F2TH': 'Dassault Falcon 2000',
     'FA7X': 'Dassault Falcon 7X',
     'H25B': 'Hawker 800XP',
+    'E35L': 'Embraer Legacy 600',
     'E55P': 'Embraer Phenom 300',
     'E545': 'Embraer Legacy 450',
     'E550': 'Embraer Phenom 300E',

@@ -191,7 +191,7 @@ FlightTrak uses a flexible filtering system with both exclusion and inclusion li
 3. **Inclusion Override:**
    - Operators listed in `private_jet_inclusion_list.js` are SHOWN even with PRIVATE_FLIGHTS=no
    - Use this to track specific operators you care about (e.g., NetJets activity)
-   - Default: EJA (NetJets), LXJ (Flexjet)
+   - Default: EJA (NetJets), LXJ (Flexjet), VJT (VistaJet)
 
 4. **Always Included:**
    - All commercial airlines (major airlines, regional carriers, cargo)
@@ -215,16 +215,28 @@ To modify:
 
 See the files for detailed documentation and examples.
 
+### Private flight enrichment (adsb.lol)
+
+When private flights are enabled (`PRIVATE_FLIGHTS=yes`), FlightTrak avoids spending FR24/FlightAware credits on private/charter flights.
+Instead, private flights use the free `adsb.lol` API for best-effort enrichment:
+
+- **Route**: `POST /api/0/routeset` (origin/destination if available)
+- **Aircraft details** (two-step, best-effort):
+  - `GET /v2/callsign/{callsign}` → extract registration (`r`)
+  - `GET /v2/reg/{registration}` → extract aircraft type code (`t`, e.g. `B39M`)
+
+If `adsb.lol` does not return route or aircraft details for a given private flight, the flight will still display with live position/altitude, and route/type will remain unknown.
+
 ### API Fallback Logic
 
 The system intelligently manages API costs with automatic fallback:
 
-1. **Primary API Available:** Uses your selected provider (FR24 or FA)
-2. **Primary Returns No Data:** Automatically tries secondary provider
-3. **Primary Filters Flight:** Skips secondary (same filters would reject it)
-4. **Both APIs Exhausted:** 
-   * Commercial flights: Serves from 7-day cache (if available)
-   * Private jets: Shows OpenSky data only (accurate position, no route)
+1. **Private flights:** `adsb.lol` only (no FR24/FA)
+2. **Commercial flights:** Uses your selected provider (FR24 or FA)
+3. **If FR24 fails (any reason):** try `adsb.lol` (secondary), then FlightAware (tertiary) if configured
+4. **Both paid APIs unavailable/exhausted:** 
+   - Commercial flights: serve from 7-day cache (if available)
+   - Private flights: `adsb.lol` only, otherwise position-only
 
 **Example Scenarios:**
 
@@ -232,6 +244,13 @@ The system intelligently manages API costs with automatic fallback:
 * **FA cost cap reached + FR24 has credits:** System uses FR24 for all lookups
 * **Both exhausted:** Cache serves commercial flights; private jets get OpenSky-only data
 * **Flight at 1500ft (below 2000ft threshold):** Primary filters it out, secondary is NOT called (saves credits)
+
+### “Unknown prefix” private classification
+
+To avoid paid lookups for operator codes that are not known commercial airlines, FlightTrak can treat unknown 3-letter prefixes as private/charter.
+
+- `ASSUME_UNKNOWN_PREFIX_PRIVATE=yes` (default): if the 3-letter prefix is not in `COMMERCIAL_AIRLINES` and not in the inclusion list, treat as private and use `adsb.lol` only.
+- `ASSUME_UNKNOWN_PREFIX_PRIVATE=no`: only treat flights as private if they match N-number rules or appear in `private_jet_operators.js`.
 
 ---
 

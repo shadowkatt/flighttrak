@@ -50,6 +50,19 @@ const PRIVATE_JET_OPERATORS = [
     'VCG',  // Volo Aviation
     'FLG',  // Flexjet
     'LFG',  // LETS JETT
+    'GTX',  // GTA Air
+    'ELZ',  // Elite Air
+    'ASP',  // AirSprint (Canadian charter)
+    'BLK',  // BLAK International (charter broker)
+    'JNY',  // Journey Aviation
+    'VJH',  // VistaJet Germany
+    'NOJ',  // NovaJet
+    'SIY',  // Aerosiyusa
+    'VNT',  // Ventura Air Services
+    'WUP',  // Wheels Up (Delta-backed)
+    'WWI',  // Worldwide Jet Charter
+    'XEN',  // Zenflight
+    'XSR',  // Airshare (fractional ownership)
     'CMH',  // Cal-Western Aviation
     
     // === Private Charter Companies (from recent airline additions) ===
