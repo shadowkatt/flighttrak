@@ -169,7 +169,10 @@ const airlines = {
     'WDY': 'Aviation Spectrum',
     'GTX': 'GTA Air',
     'XAA': 'Centene Corporation',
-    'XFL': 'EX-FLIGHT'
+    'XFL': 'EX-FLIGHT',
+    'YEL': 'Summit Aviation',
+    'BOG': 'Live Oak Banking Company',
+    'NEW': 'Northeastern Aviation'
 };
 
 function getAirlineName(icao) {

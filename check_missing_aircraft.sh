@@ -164,7 +164,7 @@ if [ "$MISSING" -gt 0 ] && [ "$NON_INTERACTIVE" -eq 0 ]; then
         echo ""
         echo "Missing type: $code"
         printf "Enter aircraft name for %s (or type 'skip'): " "$code"
-        IFS= read -r name
+        IFS= read -r name </dev/tty
 
         if [ -z "$name" ] || [ "$name" = "skip" ] || [ "$name" = "SKIP" ]; then
             echo "  Skipped $code"

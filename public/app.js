@@ -18,8 +18,6 @@ let bannerFlightIds = new Set(); // Track which flights have been added to banne
 const MAX_BANNER_CARDS = 5; // Maximum banner cards to show (reduced for larger display)
 let flightHistory = []; // Store list of recent unique flights
 const MAX_HISTORY = 500; // Hold up to a full day of traffic (adjustable based on traffic volume)
-let historyFlightIds = new Map(); // Track flight timestamps for time-based deduplication (icao24 -> timestamp)
-const HISTORY_DEDUP_WINDOW_MS = 6 * 60 * 60 * 1000; // 6 hours - allow same flight to appear again after this window
 let ALTITUDE_THRESHOLD_FEET = null; // Loaded from server config (.env), no hardcoded default
 let availableProviders = {}; // Track which API providers are available
 let activeProvider = 'flightradar24'; // Current active enhanced provider (only ONE at a time)
@@ -385,8 +383,8 @@ function renderGrid(flights) {
 let currentPopup = null;
 let popupQueue = []; // Queue for spacing out popup notifications
 let popupQueueTimer = null;
+let isProcessingPopup = false; // Track if we're currently showing a popup
 const POPUP_DISPLAY_TIME_MS = 15000; // 15 seconds
-const POPUP_SPACING_MS = 2000; // 2 seconds between popups
 
 function showFlightPopup(flight) {
     // Skip if already showing this flight
@@ -397,21 +395,25 @@ function showFlightPopup(flight) {
     popupQueue.push(flight);
     
     // Process queue if not already running
-    if (!popupQueueTimer) {
+    if (!isProcessingPopup) {
         processPopupQueue();
     }
 }
 
 function processPopupQueue() {
     if (popupQueue.length === 0) {
+        isProcessingPopup = false;
         popupQueueTimer = null;
         return;
     }
 
+    // Mark as processing
+    isProcessingPopup = true;
+
     // Get next flight from queue
     const flight = popupQueue.shift();
     
-    // Remove existing popup if present
+    // Remove existing popup if present (should not happen with proper queueing)
     if (currentPopup) {
         currentPopup.remove();
     }
@@ -456,7 +458,7 @@ function processPopupQueue() {
     document.body.appendChild(popup);
     currentPopup = popup;
 
-    // Auto-remove after 15 seconds
+    // Auto-remove after 15 seconds and process next in queue
     setTimeout(() => {
         popup.classList.add('fade-out');
         setTimeout(() => {
@@ -466,11 +468,10 @@ function processPopupQueue() {
             if (currentPopup === popup) {
                 currentPopup = null;
             }
+            // Process next popup in queue after this one is done
+            processPopupQueue();
         }, 400);
     }, POPUP_DISPLAY_TIME_MS);
-
-    // Schedule next popup
-    popupQueueTimer = setTimeout(processPopupQueue, POPUP_SPACING_MS);
 }
 
 // Banner Grid Functions
@@ -703,20 +704,6 @@ function updateBannerCard(cardElement, flight) {
 
 function addToHistory(flight) {
     const now = Date.now();
-    
-    // Check if this flight was seen recently (within 6-hour window)
-    if (historyFlightIds.has(flight.icao24)) {
-        const lastSeen = historyFlightIds.get(flight.icao24);
-        const timeSinceLastSeen = now - lastSeen;
-        
-        if (timeSinceLastSeen < HISTORY_DEDUP_WINDOW_MS) {
-            // Still within dedup window, skip
-            return;
-        } else {
-            // Outside window, allow re-add
-            console.log(`[History] ${flight.callsign || flight.icao24} last seen ${Math.round(timeSinceLastSeen / 1000 / 60 / 60)}h ago, adding again`);
-        }
-    }
 
     const altFt = Math.round(flight.altitude * 3.28084);
     const speedMph = Math.round(flight.velocity * 2.237);
@@ -753,37 +740,15 @@ function addToHistory(flight) {
         detectedMiles: flight.detectedMiles || null // Store detected distance in miles
     };
 
-    // Track this flight's timestamp
-    historyFlightIds.set(flight.icao24, now);
-
     // Add to front
     flightHistory.unshift(logEntry);
 
     // Trim
     if (flightHistory.length > MAX_HISTORY) {
-        const removed = flightHistory.pop();
-        // Remove from tracking map (will be re-added if flight comes back)
-        historyFlightIds.delete(removed.icao24);
+        flightHistory.pop();
     }
 
     renderHistory();
-}
-
-// Cleanup stale entries from historyFlightIds Map (run periodically)
-function cleanupHistoryTimestamps() {
-    const now = Date.now();
-    let removed = 0;
-    
-    for (const [icao24, timestamp] of historyFlightIds.entries()) {
-        if (now - timestamp > HISTORY_DEDUP_WINDOW_MS) {
-            historyFlightIds.delete(icao24);
-            removed++;
-        }
-    }
-    
-    if (removed > 0) {
-        console.log(`[History Cleanup] Removed ${removed} stale timestamp entries from deduplication map`);
-    }
 }
 
 // Filter history based on search query
@@ -1376,7 +1341,4 @@ if (isTestMode) {
     
     // Poll config every 30 seconds to detect server-side provider changes (e.g., hybrid mode auto-switch)
     setInterval(fetchConfig, 30000);
-    
-    // Cleanup stale history timestamps every hour
-    setInterval(cleanupHistoryTimestamps, 60 * 60 * 1000);
 }

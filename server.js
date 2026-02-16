@@ -881,12 +881,18 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-function shouldLookupFlightAware(callsign, flight) {
+function shouldLookupFlightAware(callsign, flight, isTertiaryFallback = false) {
     if (!callsign || callsign.length < 3) return false;
 
     // Skip general aviation (N-numbers like N12345) but NOT airline codes starting with N (like NKS)
     // N-numbers have a digit as the second character, airline codes have letters
-    if (callsign.startsWith('N') && callsign.length > 1 && /\d/.test(callsign[1])) return false;
+    // EXCEPTION: Allow N-numbers when called as tertiary fallback (adsb.lol failed to provide route)
+    if (callsign.startsWith('N') && callsign.length > 1 && /\d/.test(callsign[1])) {
+        if (!isTertiaryFallback) {
+            return false;
+        }
+        console.log(`[FlightAware] Allowing N-number ${callsign} as tertiary fallback (adsb.lol incomplete)`);
+    }
 
     // If filtering private flights, only lookup commercial airlines
     if (FILTER_PRIVATE_FLIGHTS && !isCommercialFlight(callsign)) {
@@ -947,8 +953,58 @@ function shouldLookupFlightradar24(callsign, flight) {
     return true;
 }
 
-async function getFlightAwareFlightInfo(ident, flight) {
+// FlightAware no-route blocklist
+const FA_BLOCKLIST_FILE = path.join(__dirname, 'fa-blocklist.json');
+let faBlocklist = new Set();
+
+// Load FA blocklist on startup
+async function loadFABlocklist() {
+    try {
+        if (fsSync.existsSync(FA_BLOCKLIST_FILE)) {
+            const data = await fs.readFile(FA_BLOCKLIST_FILE, 'utf8');
+            const list = JSON.parse(data);
+            faBlocklist = new Set(list);
+            console.log(`[FA Blocklist] Loaded ${faBlocklist.size} callsigns that FA could not identify`);
+        }
+    } catch (error) {
+        console.error('[FA Blocklist] Failed to load:', error.message);
+        faBlocklist = new Set();
+    }
+}
+
+// Save FA blocklist to disk
+async function saveFABlocklist() {
+    try {
+        await fs.writeFile(FA_BLOCKLIST_FILE, JSON.stringify([...faBlocklist], null, 2), 'utf8');
+    } catch (error) {
+        console.error('[FA Blocklist] Failed to save:', error.message);
+    }
+}
+
+// Add callsign to blocklist
+async function addToFABlocklist(callsign) {
+    if (!callsign) return;
+    const wasNew = !faBlocklist.has(callsign);
+    faBlocklist.add(callsign);
+    if (wasNew) {
+        await saveFABlocklist();
+        console.log(`[FA Blocklist] Added ${callsign} (no route found by FA)`);
+    }
+}
+
+// Check if callsign is in blocklist
+function isInFABlocklist(callsign) {
+    return faBlocklist.has(callsign);
+}
+
+async function getFlightAwareFlightInfo(ident, flight, isTertiaryFallback = false) {
     if (!FLIGHTAWARE_ENABLED || !ident) return { success: false, reason: 'disabled', data: null };
+    
+    // Check blocklist first (callsigns that FA could not identify routes for)
+    if (isInFABlocklist(ident)) {
+        console.log(`[FlightAware] ⛔ ${ident} in blocklist (FA previously had no route data)`);
+        return { success: false, reason: 'blocklisted', data: null };
+    }
     
     // Check recent lookups first (prevents duplicate API calls within 5 min)
     const recentData = getRecentLookup(ident);
@@ -969,7 +1025,7 @@ async function getFlightAwareFlightInfo(ident, flight) {
     }
     
     // Cost-saving filter: Only lookup major airlines within specified distance
-    if (!shouldLookupFlightAware(ident, flight)) {
+    if (!shouldLookupFlightAware(ident, flight, isTertiaryFallback)) {
         return { success: false, reason: 'filtered', data: null };
     }
 
@@ -994,7 +1050,7 @@ async function getFlightAwareFlightInfo(ident, flight) {
         const duration = Date.now() - startTime;
         logAPI('FlightAware', 'GET', `/flights/${ident}`, response.status, duration);
 
-        // Note: Cost will be updated by the 10-minute polling interval
+        // Note: Cost and call count will be updated by the 10-minute polling interval
 
         if (response.data && response.data.flights && response.data.flights.length > 0) {
             // FlightAware returns multiple flight segments - select the most relevant one
@@ -1073,6 +1129,13 @@ async function getFlightAwareFlightInfo(ident, flight) {
                 departure_time: flight.actual_off || null, // Use actual_off for departure time
                 source: 'flightaware'
             };
+            
+            // If no route found, add to blocklist
+            if (!result.origin && !result.destination) {
+                console.log(`[FlightAware] ⛔ ${ident} has no origin/destination - adding to blocklist`);
+                await addToFABlocklist(ident);
+                return { success: false, reason: 'no_route', data: null };
+            }
 
             // Save to caches (without departure_time - cache is for route info only)
             const cacheResult = {
@@ -1105,9 +1168,14 @@ async function getFlightAwareFlightInfo(ident, flight) {
 
             return { success: true, reason: 'api', data: { ...result, from_cache: false } };
         }
+        
+        // No flights found - add to blocklist to prevent future API calls
+        console.log(`[FlightAware] ⛔ No flight data for ${ident} - adding to blocklist`);
+        await addToFABlocklist(ident);
         return { success: false, reason: 'no_data', data: null };
     } catch (error) {
         // Silent fail - FlightAware is optional
+        // Don't add 404s to blocklist - they could be temporary (flight just departed)
         if (error.response && error.response.status !== 404) {
             console.error(`[FlightAware] Error fetching ${ident}:`, error.message);
         }
@@ -1466,8 +1534,13 @@ async function getAdsbLolRouteInfo(callsign, flight) {
         source: result.source
     };
 
-    // Always save to 5-min dedup cache (prevents duplicate API calls)
-    saveRecentLookup(callsign, cacheResult);
+    // Only save to 5-min dedup cache if we have complete route data (origin AND destination)
+    // This prevents incomplete adsb.lol data from blocking FA fallback calls
+    if (cacheResult.origin && cacheResult.destination) {
+        saveRecentLookup(callsign, cacheResult);
+    } else {
+        console.log(`[adsb.lol] Not caching incomplete route data for ${callsign} (origin: ${cacheResult.origin}, dest: ${cacheResult.destination})`);
+    }
 
     // Only persist to 7-day cache for commercial flights (private jets reuse callsigns)
     if (!isPrivateJetOperator(callsign)) {
@@ -1926,81 +1999,102 @@ app.get('/api/route/:icao24', async (req, res) => {
     }
 
     // Route logic:
-    // - Private flights: adsb.lol ONLY (no FR24/FA usage)
-    // - Non-private flights: active provider -> backup(s) -> cache
+    // - All flights: active provider -> adsb.lol -> FlightAware (if incomplete) -> cache
+    // - Continue calling FlightAware until spend cap is reached
     if (callsign && callsign.length > 2) {
         const isPrivateCallsign = isPrivateJetOperator(callsign);
         let primaryResult = null;
         let secondaryResult = null;
+        let hasCompleteRoute = false; // Track if we have origin AND destination
 
-        // Private flights never hit paid APIs - use adsb.lol only
-        if (isPrivateCallsign) {
-            console.log(`[Route Request] 🚁 ${callsign} identified as private - trying adsb.lol only`);
-            const privateResult = await getAdsbLolRouteInfo(callsign, flightForLookup);
-            if (privateResult.success) {
-                routeData = privateResult.data;
-            } else {
-                console.log(`[Route Request] adsb.lol returned no data (${privateResult.reason}) for private flight ${callsign}`);
-            }
-        } else {
-            // Step 1: Try primary API
+        // Helper function to check if route data is complete
+        const isRouteComplete = (data) => {
+            return data && data.origin && data.destination;
+        };
+
+        // Step 1: Try primary API (FR24 or FA based on config) for commercial flights
+        if (!isPrivateCallsign) {
             if (ACTIVE_ENHANCED_PROVIDER === 'flightradar24' && isFR24Available()) {
                 console.log(`[Route Request] Trying FR24 (primary)...`);
                 primaryResult = await getFlightradar24FlightInfo(callsign, flightForLookup);
                 if (primaryResult.success) {
                     routeData = primaryResult.data;
+                    hasCompleteRoute = isRouteComplete(routeData);
                 }
             } else if (ACTIVE_ENHANCED_PROVIDER === 'flightaware' && isFAAvailable()) {
                 console.log(`[Route Request] Trying FA (primary)...`);
                 primaryResult = await getFlightAwareFlightInfo(callsign, flightForLookup);
                 if (primaryResult.success) {
                     routeData = primaryResult.data;
+                    hasCompleteRoute = isRouteComplete(routeData);
                 }
             }
+        } else {
+            console.log(`[Route Request] 🚁 ${callsign} identified as private - skipping paid primary API`);
+        }
 
-            // Step 2: If primary failed for any reason, try backups
-            if (!routeData && primaryResult) {
-                if (ACTIVE_ENHANCED_PROVIDER === 'flightradar24') {
-                    console.log(`[Route Request] FR24 returned ${primaryResult.reason}, trying adsb.lol (secondary)...`);
-                    secondaryResult = await getAdsbLolRouteInfo(callsign, flightForLookup);
-                    if (secondaryResult.success) {
-                        routeData = secondaryResult.data;
-                    }
-
-                    // adsb.lol didn't resolve route - fallback to FlightAware as tertiary
-                    if (!routeData && isFAAvailable()) {
-                        console.log(`[Route Request] adsb.lol returned no data (${secondaryResult.reason}), trying FA (tertiary)...`);
-                        const tertiaryResult = await getFlightAwareFlightInfo(callsign, flightForLookup);
-                        if (tertiaryResult.success) {
-                            routeData = tertiaryResult.data;
-                        }
-                    }
-                } else if (ACTIVE_ENHANCED_PROVIDER === 'flightaware' && isFR24Available()) {
-                    console.log(`[Route Request] FA returned no data (${primaryResult.reason}), trying FR24 (secondary)...`);
-                    secondaryResult = await getFlightradar24FlightInfo(callsign, flightForLookup);
-                    if (secondaryResult.success) {
-                        routeData = secondaryResult.data;
-                    }
+        // Step 2: Try adsb.lol (free) if we don't have complete route yet
+        if (!hasCompleteRoute) {
+            console.log(`[Route Request] Trying adsb.lol (secondary)...`);
+            secondaryResult = await getAdsbLolRouteInfo(callsign, flightForLookup);
+            if (secondaryResult.success) {
+                // Merge adsb.lol data with existing data (prefer existing origin/destination if present)
+                if (!routeData) {
+                    routeData = secondaryResult.data;
+                } else {
+                    // Merge: keep existing route if present, add aircraft type from adsb.lol
+                    routeData.origin = routeData.origin || secondaryResult.data.origin;
+                    routeData.destination = routeData.destination || secondaryResult.data.destination;
+                    routeData.aircraft_type = routeData.aircraft_type || secondaryResult.data.aircraft_type;
+                    routeData.aircraft_registration = routeData.aircraft_registration || secondaryResult.data.aircraft_registration;
                 }
+                hasCompleteRoute = isRouteComplete(routeData);
             }
+        }
 
-            // Step 3: LAST RESORT - If BOTH APIs unavailable/failed, check persistent cache
-            if (!routeData && !isFR24Available() && !isFAAvailable()) {
-                console.log(`[Route Request] 🚨 BOTH APIs unavailable - checking cache as last resort`);
+        // Step 3: If still no complete route, try FlightAware as tertiary (for both commercial AND private)
+        if (!hasCompleteRoute && isFAAvailable()) {
+            console.log(`[Route Request] ${hasCompleteRoute ? 'Incomplete' : 'No'} route data (origin: ${routeData?.origin || 'null'}, dest: ${routeData?.destination || 'null'}), trying FA (tertiary)...`);
+            const tertiaryResult = await getFlightAwareFlightInfo(callsign, flightForLookup, true);
+            if (tertiaryResult.success) {
+                // Merge FA data with existing data
+                if (!routeData) {
+                    routeData = tertiaryResult.data;
+                } else {
+                    // Keep best available data from each source
+                    routeData.origin = routeData.origin || tertiaryResult.data.origin;
+                    routeData.destination = routeData.destination || tertiaryResult.data.destination;
+                    routeData.aircraft_type = routeData.aircraft_type || tertiaryResult.data.aircraft_type;
+                    routeData.aircraft_registration = routeData.aircraft_registration || tertiaryResult.data.aircraft_registration;
+                    routeData.departure_time = tertiaryResult.data.departure_time; // Use FA departure time if available
+                }
+                hasCompleteRoute = isRouteComplete(routeData);
+            }
+        }
 
-                // For commercial flights: check persistent cache
-                console.log(`[Route Request] 📦 Checking 7-day cache for ${callsign}`);
-                const cachedData = await getCachedFlightData(callsign);
-                if (cachedData) {
-                    console.log(`[Route Request] ✓ Serving from cache (cached: ${cachedData.cached_at})`);
+        // Step 4: LAST RESORT - If BOTH APIs unavailable/failed, check persistent cache
+        if (!hasCompleteRoute && !isFR24Available() && !isFAAvailable()) {
+            console.log(`[Route Request] 🚨 BOTH APIs unavailable - checking cache as last resort`);
+
+            // For commercial flights: check persistent cache
+            console.log(`[Route Request] 📦 Checking 7-day cache for ${callsign}`);
+            const cachedData = await getCachedFlightData(callsign);
+            if (cachedData) {
+                console.log(`[Route Request] ✓ Serving from cache (cached: ${cachedData.cached_at})`);
+                if (!routeData) {
                     routeData = {
                         ...cachedData,
                         departure_time: null, // Don't show stale departure time
                         from_cache: true
                     };
                 } else {
-                    console.log(`[Route Request] ✗ No cache entry for ${callsign}`);
+                    // Merge cache data
+                    routeData.origin = routeData.origin || cachedData.origin;
+                    routeData.destination = routeData.destination || cachedData.destination;
+                    routeData.aircraft_type = routeData.aircraft_type || cachedData.aircraft_type;
                 }
+            } else {
+                console.log(`[Route Request] ✗ No cache entry for ${callsign}`);
             }
         }
     }
@@ -2336,6 +2430,9 @@ async function startServer() {
     apiCosts.total = apiCosts.flightaware + apiCosts.opensky;
     await saveUsageTracking();
     console.log(`[Startup] FlightAware cost loaded: $${apiCosts.flightaware.toFixed(4)} (${apiCosts.flightaware_calls} calls)`);
+
+    // Load FA blocklist
+    await loadFABlocklist();
 
     app.listen(PORT, () => {
         console.log(`Server running at http://localhost:${PORT}`);
