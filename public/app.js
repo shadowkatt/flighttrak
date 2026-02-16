@@ -34,14 +34,107 @@ const aircraftCategories = {
     7: 'High Perf', 8: 'Rotorcraft', 9: 'Glider', 10: 'Lighter-than-air', 11: 'Parachutist',
     12: 'Ultralight', 13: 'UAV', 14: 'Space', 15: 'Unspec', 16: 'Service', 17: 'Obstacle', 18: 'Vant', 19: 'Other'
 };
-const DEFAULT_AIRCRAFT_ICON = 'https://media.istockphoto.com/id/1160804325/vector/flying-plane.jpg?s=612x612&w=0&k=20&c=_TAG8z1f6X6UU_8iVogRE75GuGBR7ffzh5BnoZhy_wU=';
+const DEFAULT_AIRCRAFT_ICON = 'logos/default.png';
 const UNKNOWN_LOCATION = 'Unknown';
-const PRIVATE_AIRLINE_LABEL = 'Private';
+const PRIVATE_AIRLINE_LABEL = 'Private Jet';
+const INVALID_AIRLINE_VALUES = new Set(['unknown', 'unk', 'n/a', 'na', 'null', 'none']);
+
+function normalizeAirlineCode(value) {
+    if (!value) return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+    const lowered = raw.toLowerCase();
+    if (INVALID_AIRLINE_VALUES.has(lowered)) return null;
+    return raw.substring(0, 3).toUpperCase();
+}
+
+function resolveAirlineLookupCode(flight, callsign) {
+    const logoCode = normalizeAirlineCode(flight?.airline_logo_code);
+    const callsignCode = normalizeAirlineCode(callsign);
+
+    // Prefer known mapped codes first; this prevents unknown/partner codes
+    // from overriding a valid known callsign prefix (e.g., EJA -> NetJets).
+    if (logoCode && typeof isKnownAirline === 'function' && isKnownAirline(logoCode)) return logoCode;
+    if (callsignCode && typeof isKnownAirline === 'function' && isKnownAirline(callsignCode)) return callsignCode;
+
+    // Fallback to whichever non-empty code is available.
+    if (logoCode) return logoCode;
+    return callsignCode;
+}
+
+function resolveRouteEndpoints(flight, safeGetAirportName) {
+    const hasRouteOrigin = !!(flight.routeOrigin && String(flight.routeOrigin).trim());
+    const hasRouteDestination = !!(flight.routeDestination && String(flight.routeDestination).trim());
+
+    if (!hasRouteOrigin && !hasRouteDestination) {
+        return { origin: UNKNOWN_LOCATION, dest: UNKNOWN_LOCATION };
+    }
+
+    const origin = hasRouteOrigin
+        ? resolveDisplayLocation(safeGetAirportName(flight.routeOrigin) || flight.routeOrigin)
+        : UNKNOWN_LOCATION;
+    const dest = hasRouteDestination
+        ? resolveDisplayLocation(safeGetAirportName(flight.routeDestination) || flight.routeDestination)
+        : UNKNOWN_LOCATION;
+
+    return { origin, dest };
+}
 
 function getDisplayAirlineName(flight, callsign) {
-    const resolved = flight.airline || (flight.airline_logo_code ? getAirlineName(flight.airline_logo_code) : getAirlineName(callsign));
-    return resolved && String(resolved).trim() ? resolved : PRIVATE_AIRLINE_LABEL;
+    // For N-number private flights, check if we have owner info from registry
+    if (callsign && callsign.startsWith('N') && /^N\d/.test(callsign)) {
+        if (flight.private_owner) {
+            return flight.private_owner;
+        }
+    }
+    
+    const directAirline = (flight.airline || '').trim();
+    if (directAirline && !INVALID_AIRLINE_VALUES.has(directAirline.toLowerCase())) {
+        return directAirline;
+    }
+
+    const airlineCode = resolveAirlineLookupCode(flight, callsign);
+    
+    // Check if this is a regional carrier operating for a major airline
+    // Show "Airline Express" for regional partners
+    if (flight.operating_carrier && airlineCode) {
+        const regionalCarriers = ['RPA', 'ASH', 'EDV', 'ENY', 'GJS', 'SKW', 'PDT', 'JIA'];
+        const majorAirlines = {
+            'UAL': 'United Express',
+            'DAL': 'Delta Connection',
+            'AAL': 'American Eagle'
+        };
+        
+        if (regionalCarriers.includes(flight.operating_carrier) && majorAirlines[airlineCode]) {
+            return majorAirlines[airlineCode];
+        }
+    }
+    
+    if (airlineCode && isKnownAirline(airlineCode)) {
+        return getAirlineName(airlineCode);
+    }
+
+    return PRIVATE_AIRLINE_LABEL;
 }
+
+// NEW: Get operating carrier name for Recent Traffic (shows actual operator, not painted airline)
+function getOperatingCarrierName(flight, callsign) {
+    // For N-number private flights, check if we have owner info from registry
+    if (callsign && callsign.startsWith('N') && /^N\d/.test(callsign)) {
+        if (flight.private_owner) {
+            return flight.private_owner;
+        }
+    }
+    
+    // If we have operating_carrier from FR24, use it
+    if (flight.operating_carrier && isKnownAirline(flight.operating_carrier)) {
+        return getAirlineName(flight.operating_carrier);
+    }
+    
+    // Otherwise fall back to the display name logic
+    return getDisplayAirlineName(flight, callsign);
+}
+
 
 function resolveDisplayLocation(value) {
     if (!value || !String(value).trim()) return UNKNOWN_LOCATION;
@@ -107,6 +200,7 @@ function processFlights(flights) {
             const altitudeFeet = flight.altitude * 3.28084; // Convert meters to feet
             if (altitudeFeet < ALTITUDE_THRESHOLD_FEET) {
                 console.log(`[Filter] Skipping ${flight.callsign || flight.icao24} - ${Math.round(altitudeFeet)} ft (below ${ALTITUDE_THRESHOLD_FEET} ft from .env)`);
+                flight.__agentSkippedLowAltitude = true;
                 // Still track it, but don't show popup/banner/history
                 activeFlights.set(flight.icao24, flight);
                 return; // Skip to next flight
@@ -137,6 +231,12 @@ function processFlights(flights) {
                     }
                     if (route.airline_logo_code) {
                         flight.airline_logo_code = route.airline_logo_code; // Store partner airline code for logo
+                    }
+                    if (route.operating_carrier) {
+                        flight.operating_carrier = route.operating_carrier; // Store operating carrier (e.g., "RPA")
+                    }
+                    if (route.private_owner) {
+                        flight.private_owner = route.private_owner; // Store private aircraft owner
                     }
                     if (route.departure_time) {
                         flight.departure_time = route.departure_time; // Store departure time
@@ -213,6 +313,9 @@ async function fetchRouteData(flight) {
                 if (!response.ok) return { origin: null, destination: null, aircraft_type: null };
                 return response.json();
             })
+            .then(route => {
+                return route;
+            })
             .finally(() => {
                 // Clean up after request completes
                 pendingRouteRequests.delete(flight.icao24);
@@ -234,18 +337,12 @@ function renderGrid(flights) {
         const callsign = flight.callsign || 'N/A';
         const displayCallsign = (flight.callsign && flight.callsign.length > 0) ? flight.callsign : `Hex: ${flight.icao24}`;
 
-        // Resolve Airport/Country Names using helper functions from data.js
-        // If routeOrigin is an ICAO code (4 chars), try to resolve it. If it's a country, leave it.
-        let originText = resolveDisplayLocation(flight.origin_country);
-        if (flight.routeOrigin) {
-            originText = resolveDisplayLocation(getAirportName(flight.routeOrigin) || flight.routeOrigin);
-        }
-
-        const destText = flight.routeDestination ? resolveDisplayLocation(getAirportName(flight.routeDestination) || flight.routeDestination) : UNKNOWN_LOCATION;
+        const { origin: originText, dest: destText } = resolveRouteEndpoints(flight, getAirportName);
 
         // Use partner airline code for logo if available (e.g., RPA operating as UAL)
-        const logoCallsign = flight.airline_logo_code || callsign;
-        const logoUrl = getAirlineLogo(logoCallsign);
+        // Use painted_as (airline_logo_code) for logo if available, otherwise use callsign
+        const logoCode = resolveAirlineLookupCode(flight, callsign) || callsign;
+        const logoUrl = getAirlineLogo(logoCode);
         
         const category = aircraftCategories[flight.category] || '';
         
@@ -286,19 +383,43 @@ function renderGrid(flights) {
 
 // Flight Popup Notification
 let currentPopup = null;
+let popupQueue = []; // Queue for spacing out popup notifications
+let popupQueueTimer = null;
+const POPUP_DISPLAY_TIME_MS = 15000; // 15 seconds
+const POPUP_SPACING_MS = 2000; // 2 seconds between popups
 
 function showFlightPopup(flight) {
-    console.log('[Popup] Showing new flight popup for:', flight.callsign || flight.icao24);
+    // Skip if already showing this flight
+    if (currentPopup && currentPopup.dataset.icao24 === flight.icao24) return;
+    if (popupQueue.some(f => f.icao24 === flight.icao24)) return;
 
+    // Add to queue for spaced display
+    popupQueue.push(flight);
+    
+    // Process queue if not already running
+    if (!popupQueueTimer) {
+        processPopupQueue();
+    }
+}
+
+function processPopupQueue() {
+    if (popupQueue.length === 0) {
+        popupQueueTimer = null;
+        return;
+    }
+
+    // Get next flight from queue
+    const flight = popupQueue.shift();
+    
     // Remove existing popup if present
     if (currentPopup) {
         currentPopup.remove();
     }
 
     const callsign = flight.callsign || flight.icao24;
-    const logoUrl = getAirlineLogo(callsign);
+    const logoCallsign = resolveAirlineLookupCode(flight, callsign) || callsign;
+    const logoUrl = getAirlineLogo(logoCallsign);
 
-    // Resolve airport names
     const safeGetAirportName = (code) => {
         if (typeof getAirportName === 'function') {
             return getAirportName(code);
@@ -306,21 +427,18 @@ function showFlightPopup(flight) {
         return code;
     };
 
-    const origin = flight.routeOrigin ? resolveDisplayLocation(safeGetAirportName(flight.routeOrigin) || flight.routeOrigin) : resolveDisplayLocation(flight.origin_country || UNKNOWN_LOCATION);
-    const dest = flight.routeDestination ? resolveDisplayLocation(safeGetAirportName(flight.routeDestination) || flight.routeDestination) : UNKNOWN_LOCATION;
+    const { origin, dest } = resolveRouteEndpoints(flight, safeGetAirportName);
 
-    // Strip airport codes for display
     const originCity = origin.includes('(') ? origin.replace(/\s*\([^)]*\)/, '') : origin;
     const destCity = dest.includes('(') ? dest.replace(/\s*\([^)]*\)/, '') : dest;
 
-    // Get aircraft type
     const category = aircraftCategories[flight.category] || '';
     const rawType = flight.aircraft_type || category || '';
     const aircraftInfo = typeof getAircraftTypeName !== 'undefined' ? getAircraftTypeName(rawType) : rawType;
 
-    // Create popup element
     const popup = document.createElement('div');
     popup.className = 'flight-popup';
+    popup.dataset.icao24 = flight.icao24;
     popup.innerHTML = `
         <div class="flight-popup-header">✈ NEW FLIGHT DETECTED</div>
         <div class="flight-popup-content">
@@ -338,7 +456,7 @@ function showFlightPopup(flight) {
     document.body.appendChild(popup);
     currentPopup = popup;
 
-    // Auto-remove after 10 seconds
+    // Auto-remove after 15 seconds
     setTimeout(() => {
         popup.classList.add('fade-out');
         setTimeout(() => {
@@ -348,8 +466,11 @@ function showFlightPopup(flight) {
             if (currentPopup === popup) {
                 currentPopup = null;
             }
-        }, 400); // Match fade-out animation duration
-    }, 10000);
+        }, 400);
+    }, POPUP_DISPLAY_TIME_MS);
+
+    // Schedule next popup
+    popupQueueTimer = setTimeout(processPopupQueue, POPUP_SPACING_MS);
 }
 
 // Banner Grid Functions
@@ -409,7 +530,7 @@ function createBannerCardHTML(flight) {
     const callsign = flight.callsign || flight.icao24;
     
     // Use partner airline code for logo if available (e.g., RPA operating as UAL)
-    const logoCallsign = flight.airline_logo_code || callsign;
+    const logoCallsign = resolveAirlineLookupCode(flight, callsign) || callsign;
     const logoUrl = getAirlineLogo(logoCallsign);
     
     // Use API airline if available, otherwise lookup from airline_logo_code (painted_as), then fallback to callsign
@@ -430,8 +551,7 @@ function createBannerCardHTML(flight) {
         return code;
     };
 
-    const origin = flight.routeOrigin ? resolveDisplayLocation(safeGetAirportName(flight.routeOrigin) || flight.routeOrigin) : resolveDisplayLocation(flight.origin_country || UNKNOWN_LOCATION);
-    const dest = flight.routeDestination ? resolveDisplayLocation(safeGetAirportName(flight.routeDestination) || flight.routeDestination) : UNKNOWN_LOCATION;
+    const { origin, dest } = resolveRouteEndpoints(flight, safeGetAirportName);
 
     // Strip airport codes for banner display
     const originCity = origin.includes('(') ? origin.replace(/\s*\([^)]*\)/, '') : origin;
@@ -465,6 +585,10 @@ function createBannerCardHTML(flight) {
     // Check if aircraft type is unknown
     const isUnknown = rawType && rawType === aircraftInfo && rawType.length <= 6;
 
+    const routeDisplay = (originCity === UNKNOWN_LOCATION && destCity === UNKNOWN_LOCATION)
+        ? UNKNOWN_LOCATION
+        : `${originCity} → ${destCity}`;
+
     return `
         <div class="banner-card" data-icao24="${flight.icao24}">
             <div class="airline-logo-container">
@@ -474,7 +598,7 @@ function createBannerCardHTML(flight) {
                 <div class="banner-callsign">${callsign}</div>
                 ${airlineName ? `<div class="banner-airline">${airlineName}</div>` : ''}
             </div>
-            <div class="banner-route">${originCity} → ${destCity}${departureDisplay ? ` <span class="eta-inline">(${departureDisplay})</span>` : ''}</div>
+            <div class="banner-route">${routeDisplay}${departureDisplay ? ` <span class="eta-inline">(${departureDisplay})</span>` : ''}</div>
             <div class="banner-type ${isUnknown ? 'clickable-aircraft-type' : ''}" 
                  data-code="${isUnknown ? rawType : ''}" 
                  title="${isUnknown ? 'Click to identify this aircraft type' : aircraftInfo}">
@@ -529,14 +653,16 @@ function updateBannerCard(cardElement, flight) {
         return code;
     };
     
-    const origin = flight.routeOrigin ? resolveDisplayLocation(safeGetAirportName(flight.routeOrigin) || flight.routeOrigin) : resolveDisplayLocation(flight.origin_country || UNKNOWN_LOCATION);
-    const dest = flight.routeDestination ? resolveDisplayLocation(safeGetAirportName(flight.routeDestination) || flight.routeDestination) : UNKNOWN_LOCATION;
+    const { origin, dest } = resolveRouteEndpoints(flight, safeGetAirportName);
     const originCity = origin.includes('(') ? origin.replace(/\s*\([^)]*\)/, '') : origin;
     const destCity = dest.includes('(') ? dest.replace(/\s*\([^)]*\)/, '') : dest;
     
     const routeElement = cardElement.querySelector('.banner-route');
     if (routeElement) {
-        const newRouteHTML = `${originCity} → ${destCity}${departureDisplay ? ` <span class="eta-inline">(${departureDisplay})</span>` : ''}`;
+        const routeDisplay = (originCity === UNKNOWN_LOCATION && destCity === UNKNOWN_LOCATION)
+            ? UNKNOWN_LOCATION
+            : `${originCity} → ${destCity}`;
+        const newRouteHTML = `${routeDisplay}${departureDisplay ? ` <span class="eta-inline">(${departureDisplay})</span>` : ''}`;
         if (routeElement.innerHTML !== newRouteHTML) {
             routeElement.innerHTML = newRouteHTML;
         }
@@ -596,7 +722,8 @@ function addToHistory(flight) {
     const speedMph = Math.round(flight.velocity * 2.237);
     const vrFpm = Math.round((flight.vertical_rate || 0) * 196.85);
     const callsign = flight.callsign || flight.icao24;
-    const logoUrl = getAirlineLogo(callsign);
+    const logoCode = resolveAirlineLookupCode(flight, callsign) || callsign;
+    const logoUrl = getAirlineLogo(logoCode);
 
     // Prefer Route Origin/Dest
     const safeGetAirportName = (code) => {
@@ -606,8 +733,7 @@ function addToHistory(flight) {
         return code;
     };
 
-    const origin = flight.routeOrigin ? resolveDisplayLocation(safeGetAirportName(flight.routeOrigin) || flight.routeOrigin) : resolveDisplayLocation(flight.origin_country || UNKNOWN_LOCATION);
-    const dest = flight.routeDestination ? resolveDisplayLocation(safeGetAirportName(flight.routeDestination) || flight.routeDestination) : UNKNOWN_LOCATION;
+    const { origin, dest } = resolveRouteEndpoints(flight, safeGetAirportName);
 
 
     const logEntry = {
@@ -622,7 +748,7 @@ function addToHistory(flight) {
         speed: speedMph,
         vr: vrFpm,
         logo: logoUrl,
-        airline: getDisplayAirlineName(flight, callsign), // Use API/lookup airline, fallback to Private
+        airline: getOperatingCarrierName(flight, callsign), // Use operating carrier name for Recent Traffic
         type: flight.aircraft_type || aircraftCategories[flight.category] || 'N/A',
         detectedMiles: flight.detectedMiles || null // Store detected distance in miles
     };

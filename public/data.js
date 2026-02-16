@@ -6,6 +6,7 @@ const airlines = {
     'SWA': 'Southwest Airlines',
     'JBU': 'JetBlue Airways',
     'ASA': 'Alaska Airlines',
+    'AAY': 'Allegiant Air',
     'NKS': 'Spirit Airlines',
     'FFT': 'Frontier Airlines',
     'HAL': 'Hawaiian Airlines',
@@ -13,6 +14,7 @@ const airlines = {
     'MXY': 'Breeze Airways',
     'AVX': 'Avelo Airlines',
     'RPA': 'Republic Airways',
+    'ASH': 'Mesa Airlines',
     'JIA': 'PSA Airlines',
     'EDV': 'Endeavor Air',
     'ENY': 'Envoy Air',
@@ -26,25 +28,16 @@ const airlines = {
     'WJA': 'WestJet',
     'PTR': 'Porter Airlines',
     'POE': 'Porter Airlines',
-    'LXJ': 'Flexjet',
     'JSX': 'JSX Air',
-    'VJA': 'Vista America',
-    'TIV': 'Thrive',
-    'EJA': 'NetJets',
-    'ASP': 'AirSprint',
-    'BLK': 'BLAK International',
-    'JNY': 'Journey Aviation',
-    'VJH': 'VistaJet Germany',
-    'ELZ': 'Elite Air',
-    'NOJ': 'NovaJet',
-    'SIY': 'Aerosiyusa',
-    'VNT': 'Ventura Air Services',
-    'WUP': 'Wheels Up',
-    'WWI': 'Worldwide Jet Charter',
-    'XEN': 'Zenflight',
-    'XSR': 'Airshare',
     'DJT': 'La Compagnie',
     'GTI': 'Atlas Air',
+    'ABW': 'AirBridgeCargo Airlines',
+    'ABR': 'ASL Airlines Ireland',
+    'ACP': 'Astral Aviation',
+    'ADZ': 'Compass Cargo Airlines',
+    'AHK': 'Air Hong Kong',
+    'AJT': 'Amerijet International',
+    'AMF': 'Ameriflight',
     'UPS': 'UPS Airlines',
     'FDX': 'FedEx Express',
     'ABX': 'ABX Air',
@@ -107,7 +100,6 @@ const airlines = {
     'ANZ': 'Air New Zealand',
     'VOZ': 'Virgin Australia',
     'QFA': 'Qantas',
-    'WJA': 'WestJet',
     'ACA': 'Air Canada',
     'TSC': 'Air Transat',
     'ROU': 'Air Canada Rouge',
@@ -130,24 +122,52 @@ const airlines = {
     'GWI': 'Eurowings',
     'RBA': 'Royal Brunei',
     'FBU': 'French Bee',
+    'AAR': 'Asiana Airlines',
+    'ABL': 'Air Busan',
+    'ABY': 'Air Arabia',
+    'ACI': 'Aircalin',
+    'AEA': 'Air Europa',
+    'AFL': 'Aeroflot',
+    'ANE': 'Air Nostrum',
     
     // Private Aviation & Charter Operators
+    'EJA': 'NetJets',
+    'EJM': 'NetJets Management',
+    'LXJ': 'Flexjet',
+    'VJT': 'VistaJet',
+    'VJA': 'Vista America',
+    'TIV': 'Thrive',
+    'ASP': 'AirSprint',
+    'BLK': 'BLAK International',
+    'JAS': 'Jet Aviation',
+    'VJH': 'VistaJet Germany',
+    'ELZ': 'Elite Air',
+    'EDG': 'Jet Edge',
+    'NOJ': 'NovaJet',
+    'SIY': 'Aerosiyusa',
+    'VNT': 'Ventura Air Services',
+    'WUP': 'Wheels Up',
+    'WWI': 'Worldwide Jet Charter',
+    'XEN': 'Zenflight',
+    'XSR': 'Airshare',
     'BVR': 'ACM Air Charter',
     'CNS': 'Cobalt Air',
-    'EJM': 'NetJets Management',
     'ERY': 'Sky Quest',
     'JRE': 'Jet Share',
     'JTL': 'Jet Linx Aviation',
     'KFB': 'STAjets',
     'KOW': 'Baker Aviation',
     'MJS': 'JET SAVER',
+    'MVJ': 'Mira Vista Aviation',
     'RKJ': 'Charter Airlines',
     'RNI': 'Rennia Aviation',
+    'SBY': 'Skyservice',
     'SGX': 'Slate Aviation',
     'TCN': 'BellAir',
     'TFF': 'Talon Air',
     'TWY': 'Sunset Aviation',
-    'VJT': 'VistaJet',
+    'WDY': 'Aviation Spectrum',
+    'GTX': 'GTA Air',
     'XAA': 'Centene Corporation',
     'XFL': 'EX-FLIGHT'
 };
@@ -161,7 +181,7 @@ function getAirlineName(icao) {
 // Logo Override Configuration
 const logoOverrides = {
     // JetBlue - Brighter logo for better visibility
-    'JBU': 'logos/JBU.jpg',
+    'JBU': 'logos/JBU.png',
     
     // El Al - Brighter logo for better visibility
     'ELY': 'logos/ELY.jpg',
@@ -184,4 +204,10 @@ function getAirlineLogo(icao) {
     // Fall back to GitHub CDN
     const cdnBase = 'https://raw.githubusercontent.com/sexym0nk3y/airline-logos/main/logos';
     return `${cdnBase}/${airlineCode}.png`;
+}
+// Helper to check if an airline code is known
+function isKnownAirline(icao) {
+    if (!icao || icao.length < 3) return false;
+    const prefix = icao.substring(0, 3).toUpperCase();
+    return prefix in airlines;
 }

@@ -78,11 +78,16 @@ echo ""
 echo "Extracting aircraft types from recent logs..."
 LOG_DATA="$(docker logs "$CONTAINER_NAME" --tail="$LOG_TAIL" 2>&1 || true)"
 
-# Extract from both "type" and "aircraft_type" fields, then keep valid ICAO-like codes only.
+# Strip ANSI color codes and extract aircraft types
+# Extract from multiple formats:
+# 1. Escaped JSON: \"type\":\"A320\"
+# 2. Parsed output: type: A320
 FOUND_TYPES="$(
     printf '%s\n' "$LOG_DATA" \
-    | rg -o '"(type|aircraft_type)"\s*:\s*"[^"]+"' \
-    | sed -E 's/.*:\s*"([^"]+)"/\1/' \
+    | sed 's/\x1b\[[0-9;]*m//g' \
+    | rg -o '(\\"(type|aircraft_type)\\":\\"([A-Z0-9]{3,5})\\"|type: ([A-Z0-9]{3,5}))' \
+    | sed -E 's/.*:\\"?([A-Z0-9]{3,5})\\".*/\1/' \
+    | sed -E 's/.*: ([A-Z0-9]{3,5}).*/\1/' \
     | rg '^[A-Z0-9]{3,5}$' \
     | sort -u
 )"
@@ -104,10 +109,15 @@ echo "=== Aircraft Types Found in Logs ==="
 if [ "$TOTAL_FOUND" -eq 0 ]; then
     echo "  (No aircraft types found in recent logs)"
 else
+    # Strip ANSI codes once for counting
+    STRIPPED_LOG_DATA="$(printf '%s\n' "$LOG_DATA" | sed 's/\x1b\[[0-9;]*m//g')"
+    
     while IFS= read -r type; do
         [ -z "$type" ] && continue
-        count="$(printf '%s\n' "$LOG_DATA" | rg -o "\"(type|aircraft_type)\"\\s*:\\s*\"$type\"" | wc -l | tr -d ' ')"
-        printf "  %-10s (seen %d times)\n" "$type" "$count"
+        # Simple count: just count how many times the type appears in logs
+        count=$(echo "$STRIPPED_LOG_DATA" | grep -c "\"$type\"" 2>/dev/null || echo 1)
+        count=$(echo "$count" | head -1 | tr -d '\n')
+        printf "  %-10s (seen %s times)\n" "$type" "$count"
     done <<EOF
 $FOUND_TYPES
 EOF
@@ -121,8 +131,9 @@ if [ "$TOTAL_FOUND" -gt 0 ]; then
     while IFS= read -r type; do
         [ -z "$type" ] && continue
         if ! printf '%s\n' "$KNOWN_TYPES" | rg -Fxq "$type"; then
-            count="$(printf '%s\n' "$LOG_DATA" | rg -o "\"(type|aircraft_type)\"\\s*:\\s*\"$type\"" | wc -l | tr -d ' ')"
-            printf "  %-10s (seen %d times) - NEEDS TO BE ADDED\n" "$type" "$count"
+            count=$(echo "$STRIPPED_LOG_DATA" | grep -c "\"$type\"" 2>/dev/null || echo 1)
+            count=$(echo "$count" | head -1 | tr -d '\n')
+            printf "  %-10s (seen %s times) - NEEDS TO BE ADDED\n" "$type" "$count"
             MISSING_CODES="${MISSING_CODES}${type}"$'\n'
             MISSING=$((MISSING + 1))
         fi

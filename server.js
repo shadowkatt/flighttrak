@@ -2,6 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const fs = require('fs').promises;
+const fsSync = require('fs');
 const path = require('path');
 const pino = require('pino');
 require('dotenv').config();
@@ -435,6 +436,72 @@ async function cleanExpiredCacheEntries() {
 const FLIGHTAWARE_BASE_URL = 'https://aeroapi.flightaware.com/aeroapi';
 const FLIGHTAWARE_ENABLED = !!process.env.FLIGHTAWARE_API_KEY; // Enabled if API key is present
 
+// Private Aircraft Registry Lookup (for N-number flights)
+const PRIVATE_REGISTRY_PATH = path.join(__dirname, 'private.csv');
+let privateRegistryMap = new Map(); // registration_number -> registrant_name
+
+async function loadPrivateRegistry() {
+    try {
+        const fileContent = await fs.readFile(PRIVATE_REGISTRY_PATH, 'utf-8');
+        const lines = fileContent.split('\n');
+        
+        let skipped = 0;
+        let loaded = 0;
+        
+        // Skip header row
+        for (let i = 1; i < lines.length; i++) {
+            const line = lines[i].trim();
+            if (!line) {
+                skipped++;
+                continue;
+            }
+            
+            // Split by comma (simple CSV parsing)
+            const parts = line.split(',');
+            if (parts.length >= 2) {
+                const registration = parts[0].trim().toUpperCase();
+                const registrant = parts[1].trim();
+                
+                if (registration && registrant) {
+                    privateRegistryMap.set(registration, registrant);
+                    loaded++;
+                } else {
+                    skipped++;
+                }
+            } else {
+                skipped++;
+            }
+        }
+        
+        console.log(`[Private Registry] Loaded ${privateRegistryMap.size} aircraft registrations (${loaded} loaded, ${skipped} skipped, ${lines.length} total lines)`);
+    } catch (error) {
+        console.error('[Private Registry] Failed to load private.csv:', error.message);
+        // Continue without registry - will fall back to "Private Jet"
+    }
+}
+
+// Load registry on startup
+loadPrivateRegistry();
+
+function lookupPrivateOwner(registration) {
+    if (!registration || typeof registration !== 'string') return null;
+    
+    // Normalize registration (uppercase, remove spaces/dashes)
+    const normalized = registration.toUpperCase().replace(/[\s-]/g, '');
+    
+    // Direct lookup
+    const owner = privateRegistryMap.get(normalized);
+    if (owner) {
+        // Clean up common registry artifacts
+        if (owner === 'REGISTRATION PENDING' || owner === 'SALE REPORTED' || owner === 'RESERVED') {
+            return null; // Treat as no match
+        }
+        return owner;
+    }
+    
+    return null;
+}
+
 // FlightAware Enhanced Lookup Altitude (in feet)
 // 0 = Disabled (FREE), >0 = Enhanced data for flights above this altitude
 // Default: 2000 feet (filters out landing/departing flights)
@@ -487,7 +554,7 @@ const COMMERCIAL_AIRLINES = new Set([
     'RPA', 'JIA', 'EDV', 'SKW', 'ENY', 'CPZ', 'GJS', 'PDT',
     'SCX', 'QXE', 'ASH', 'AWI', 'UCA', 'DJT', 'VJA',
     // Private/Charter (with public flight info)
-    'EJA', 'LXJ', 'JSX', 'TIV',
+    'JSX',
     // Cargo/Shipping
     'GTI', 'UPS', 'FDX', 'ABX', 'ATN', 'GEC',
     // Canadian
@@ -509,7 +576,9 @@ const COMMERCIAL_AIRLINES = new Set([
     // Latin American
     'AVA', 'CMP', 'TAM',
     // Other International
-    'AIC', 'APZ', 'AAY', 'DWI', 'BMA', 'MXY', 'FBU'
+    'AIC', 'APZ', 'AAY', 'DWI', 'BMA', 'MXY', 'FBU',
+    // 123ATC (Letter A) - additional commercial/cargo carriers
+    'ABW', 'ABR', 'ACP', 'ADZ', 'AHK', 'AJT', 'AMF', 'AFL', 'ABY', 'ABL', 'ACI', 'AEA', 'ANE'
 ]);
 
 function isCommercialFlight(callsign) {
@@ -1193,6 +1262,7 @@ async function getFlightradar24FlightInfo(callsign, flight) {
             aircraft_type: flightData.type || flightData.aircraft?.type || flightData.aircraft_type || null,
             airline: airlineDisplay,
             airline_logo_code: airlineLogoCode,
+            operating_carrier: flightData.operating_as || null, // NEW: Send operating carrier to client
             aircraft_registration: flightData.reg || flightData.aircraft?.registration || flightData.registration || null,
             departure_time: flightData.datetime_takeoff || null, // Departure time instead of ETA
             source: 'flightradar24'
@@ -1341,22 +1411,26 @@ async function getAdsbLolRouteInfo(callsign, flight) {
     }
 
     if (route) {
-        if (route.plausible === 0) {
-            console.log(`[adsb.lol] Route data for ${callsign} marked implausible`);
-        } else {
-            if (typeof route.airport_codes === 'string' && route.airport_codes.includes('-')) {
-                const [orig, dest] = route.airport_codes.split('-');
-                origin = orig || null;
-                destination = dest || null;
-            }
-
-            if ((!origin || !destination) && Array.isArray(route._airports) && route._airports.length >= 2) {
-                origin = origin || route._airports[0]?.icao || null;
-                destination = destination || route._airports[1]?.icao || null;
-            }
+        const hasValidRoute = route.plausible !== 0;
+        
+        if (!hasValidRoute) {
+            console.log(`[adsb.lol] Route data for ${callsign} marked implausible, trying _airports fallback`);
+        }
+        
+        // Try to extract route from airport_codes or _airports
+        if (typeof route.airport_codes === 'string' && route.airport_codes.includes('-')) {
+            const [orig, dest] = route.airport_codes.split('-');
+            origin = orig || null;
+            destination = dest || null;
         }
 
-        if (route.airline_code) {
+        // Also try _airports array (works even if route is implausible)
+        if ((!origin || !destination) && Array.isArray(route._airports) && route._airports.length >= 2) {
+            origin = origin || route._airports[0]?.icao || null;
+            destination = destination || route._airports[1]?.icao || null;
+        }
+
+        if (route.airline_code && route.airline_code !== 'unknown') {
             airlineCode = route.airline_code;
         }
     }
@@ -1932,6 +2006,21 @@ app.get('/api/route/:icao24', async (req, res) => {
     }
 
     if (routeData) {
+        // For N-number private flights, try to look up owner from registration database
+        if (callsign && callsign.startsWith('N') && /^N\d/.test(callsign)) {
+            // This is an N-number (starts with N followed by a digit)
+            const registration = routeData.aircraft_registration || callsign;
+            const owner = lookupPrivateOwner(registration);
+            
+            if (owner) {
+                console.log(`[Private Registry] Found owner for ${registration}: ${owner}`);
+                routeData.private_owner = owner;
+            } else {
+                console.log(`[Private Registry] No owner found for ${registration}`);
+                routeData.private_owner = null;
+            }
+        }
+        
         return res.json(routeData);
     }
 
@@ -1947,18 +2036,6 @@ app.get('/api/route/:icao24', async (req, res) => {
         message: 'Enhanced route data not available'
     });
 });
-
-// Haversine Distance Calculation - Calculate distance in miles between two lat/lon points
-function calculateDistance(lat1, lon1, lat2, lon2) {
-    const R = 3958.8; // Earth's radius in miles
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-              Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c; // Distance in miles
-}
 
 // Configure Node Geocoder with proper User-Agent to comply with OSM usage policy
 const NodeGeocoder = require('node-geocoder');
