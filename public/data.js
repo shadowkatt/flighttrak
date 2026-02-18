@@ -1,14 +1,23 @@
 // Airline ICAO to Name Mapping
 const airlines = {
     'UAL': 'United Airlines',
+    'UA': 'United Airlines',  // IATA code (2-letter)
     'AAL': 'American Airlines',
+    'AA': 'American Airlines',  // IATA code (2-letter)
     'DAL': 'Delta Air Lines',
+    'DL': 'Delta Air Lines',  // IATA code (2-letter)
     'SWA': 'Southwest Airlines',
+    'WN': 'Southwest Airlines',  // IATA code (2-letter)
     'JBU': 'JetBlue Airways',
+    'B6': 'JetBlue Airways',  // IATA code (2-letter)
     'ASA': 'Alaska Airlines',
+    'AS': 'Alaska Airlines',  // IATA code (2-letter)
     'AAY': 'Allegiant Air',
+    'G4': 'Allegiant Air',  // IATA code (2-letter)
     'NKS': 'Spirit Airlines',
+    'NK': 'Spirit Airlines',  // IATA code (2-letter)
     'FFT': 'Frontier Airlines',
+    'F9': 'Frontier Airlines',  // IATA code (2-letter)
     'HAL': 'Hawaiian Airlines',
     'BRE': 'Breeze Airways',
     'MXY': 'Breeze Airways',
@@ -172,13 +181,29 @@ const airlines = {
     'XFL': 'EX-FLIGHT',
     'YEL': 'Summit Aviation',
     'BOG': 'Live Oak Banking Company',
-    'NEW': 'Northeastern Aviation'
+    'NEW': 'Northeastern Aviation',
+    'RJR': 'JumpJet',
+    'POD': 'Craft Air',
+    'QQE': 'Qatar Executive',
+    'LBQ': 'Quest Diagnostics',
+    'JTZ': 'Nicholas Air',
+    'GMH': 'Hughes Flying Service',
+    'STY': 'Altius Aviation',
+    'GXA': 'GlobalX Air'
 };
 
 function getAirlineName(icao) {
-    if (!icao || icao.length < 3) return icao;
-    const prefix = icao.substring(0, 3).toUpperCase();
-    return airlines[prefix] || icao;
+    if (!icao || icao.length < 2) return icao;
+    
+    // Try 3-letter ICAO code first
+    const prefix3 = icao.substring(0, 3).toUpperCase();
+    if (airlines[prefix3]) return airlines[prefix3];
+    
+    // Try 2-letter IATA code as fallback
+    const prefix2 = icao.substring(0, 2).toUpperCase();
+    if (airlines[prefix2]) return airlines[prefix2];
+    
+    return icao;
 }
 
 // Logo Override Configuration
@@ -210,7 +235,13 @@ function getAirlineLogo(icao) {
 }
 // Helper to check if an airline code is known
 function isKnownAirline(icao) {
-    if (!icao || icao.length < 3) return false;
-    const prefix = icao.substring(0, 3).toUpperCase();
-    return prefix in airlines;
+    if (!icao || icao.length < 2) return false;
+    
+    // Check 3-letter ICAO code first
+    const prefix3 = icao.substring(0, 3).toUpperCase();
+    if (prefix3 in airlines) return true;
+    
+    // Check 2-letter IATA code as fallback
+    const prefix2 = icao.substring(0, 2).toUpperCase();
+    return prefix2 in airlines;
 }

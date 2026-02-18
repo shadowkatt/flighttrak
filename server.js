@@ -437,45 +437,44 @@ const FLIGHTAWARE_BASE_URL = 'https://aeroapi.flightaware.com/aeroapi';
 const FLIGHTAWARE_ENABLED = !!process.env.FLIGHTAWARE_API_KEY; // Enabled if API key is present
 
 // Private Aircraft Registry Lookup (for N-number flights)
-const PRIVATE_REGISTRY_PATH = path.join(__dirname, 'private.csv');
+const PRIVATE_REGISTRY_PATH = path.join(__dirname, 'private_processed.json');
 let privateRegistryMap = new Map(); // registration_number -> registrant_name
 
 async function loadPrivateRegistry() {
     try {
         const fileContent = await fs.readFile(PRIVATE_REGISTRY_PATH, 'utf-8');
-        const lines = fileContent.split('\n');
+        const registrations = JSON.parse(fileContent);
         
         let skipped = 0;
         let loaded = 0;
         
-        // Skip header row
-        for (let i = 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) {
+        for (const entry of registrations) {
+            const registration = entry.registration?.trim();
+            const registrant = entry.registrant?.trim();
+            
+            if (!registration || !registrant) {
                 skipped++;
                 continue;
             }
             
-            // Split by comma (simple CSV parsing)
-            const parts = line.split(',');
-            if (parts.length >= 2) {
-                const registration = parts[0].trim().toUpperCase();
-                const registrant = parts[1].trim();
-                
-                if (registration && registrant) {
-                    privateRegistryMap.set(registration, registrant);
-                    loaded++;
-                } else {
-                    skipped++;
-                }
-            } else {
+            // Filter out placeholder/invalid entries
+            const registrantUpper = registrant.toUpperCase();
+            if (registrantUpper === 'REGISTRATION PENDING' || 
+                registrantUpper === 'SALE REPORTED' || 
+                registrantUpper === 'RESERVED') {
                 skipped++;
+                continue;
             }
+            
+            // Store in map (normalized registration as key)
+            const normalizedReg = registration.toUpperCase().replace(/[\s-]/g, '');
+            privateRegistryMap.set(normalizedReg, registrant);
+            loaded++;
         }
         
-        console.log(`[Private Registry] Loaded ${privateRegistryMap.size} aircraft registrations (${loaded} loaded, ${skipped} skipped, ${lines.length} total lines)`);
+        console.log(`[Private Registry] Loaded ${privateRegistryMap.size} aircraft registrations (${loaded} loaded, ${skipped} skipped, ${registrations.length} total entries)`);
     } catch (error) {
-        console.error('[Private Registry] Failed to load private.csv:', error.message);
+        console.error('[Private Registry] Failed to load private_processed.json:', error.message);
         // Continue without registry - will fall back to "Private Jet"
     }
 }
@@ -548,8 +547,8 @@ const PRIVATE_JET_INCLUSION_LIST = require('./private_jet_inclusion_list.js');
 // Includes passenger airlines and cargo/shipping companies
 // Commercial Airlines - Consolidated list of all commercial airline ICAO codes
 const COMMERCIAL_AIRLINES = new Set([
-    // US Major Airlines
-    'UAL', 'AAL', 'DAL', 'SWA', 'JBU', 'ASA', 'NKS', 'FFT', 'HAL', 'BRE', 'AVX',
+    // US Major Airlines (ICAO + IATA codes)
+    'UAL', 'UA', 'AAL', 'AA', 'DAL', 'DL', 'SWA', 'WN', 'JBU', 'B6', 'ASA', 'AS', 'NKS', 'NK', 'FFT', 'F9', 'HAL', 'HA', 'BRE', 'AVX',
     // US Regional/Commuter
     'RPA', 'JIA', 'EDV', 'SKW', 'ENY', 'CPZ', 'GJS', 'PDT',
     'SCX', 'QXE', 'ASH', 'AWI', 'UCA', 'DJT', 'VJA',
@@ -1482,24 +1481,27 @@ async function getAdsbLolRouteInfo(callsign, flight) {
         const hasValidRoute = route.plausible !== 0;
         
         if (!hasValidRoute) {
-            console.log(`[adsb.lol] Route data for ${callsign} marked implausible, trying _airports fallback`);
-        }
-        
-        // Try to extract route from airport_codes or _airports
-        if (typeof route.airport_codes === 'string' && route.airport_codes.includes('-')) {
-            const [orig, dest] = route.airport_codes.split('-');
-            origin = orig || null;
-            destination = dest || null;
-        }
+            console.log(`[adsb.lol] Route data for ${callsign} marked implausible (plausible: ${route.plausible}) - treating as incomplete`);
+            // Don't use implausible route data - let FlightAware try instead
+            // But still extract aircraft type if available
+            aircraftType = route.type || aircraftType;
+        } else {
+            // Try to extract route from airport_codes or _airports
+            if (typeof route.airport_codes === 'string' && route.airport_codes.includes('-')) {
+                const [orig, dest] = route.airport_codes.split('-');
+                origin = orig || null;
+                destination = dest || null;
+            }
 
-        // Also try _airports array (works even if route is implausible)
-        if ((!origin || !destination) && Array.isArray(route._airports) && route._airports.length >= 2) {
-            origin = origin || route._airports[0]?.icao || null;
-            destination = destination || route._airports[1]?.icao || null;
-        }
+            // Also try _airports array
+            if ((!origin || !destination) && Array.isArray(route._airports) && route._airports.length >= 2) {
+                origin = origin || route._airports[0]?.icao || null;
+                destination = destination || route._airports[1]?.icao || null;
+            }
 
-        if (route.airline_code && route.airline_code !== 'unknown') {
-            airlineCode = route.airline_code;
+            if (route.airline_code && route.airline_code !== 'unknown') {
+                airlineCode = route.airline_code;
+            }
         }
     }
 

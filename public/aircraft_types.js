@@ -183,7 +183,9 @@ const aircraftTypes = {
     'BE40': 'Beechcraft King Air 350',
     'B350': 'Beechcraft King Air 350',
     'C650': 'Cessna Citation III',
-    'GA5C': 'Gulfstream G500'
+    'GA5C': 'Gulfstream G500',
+    'EPIC': 'EPIC E1000',
+    'PRM1': 'BEECHCRAFT PREMIER 1',
 };
 
 // Track unknown aircraft types for debugging
