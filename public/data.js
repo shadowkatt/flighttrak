@@ -37,9 +37,11 @@ const airlines = {
     'WJA': 'WestJet',
     'PTR': 'Porter Airlines',
     'POE': 'Porter Airlines',
+    'PVL': 'PAL Airlines',
     'JSX': 'JSX Air',
     'DJT': 'La Compagnie',
     'GTI': 'Atlas Air',
+    'BOX': 'AeroLogic',
     'ABW': 'AirBridgeCargo Airlines',
     'ABR': 'ASL Airlines Ireland',
     'ACP': 'Astral Aviation',
@@ -50,6 +52,7 @@ const airlines = {
     'UPS': 'UPS Airlines',
     'FDX': 'FedEx Express',
     'ABX': 'ABX Air',
+    'ATN': 'Air Transport International',
     'MTN': 'Mountain Air Cargo',
     'BAW': 'British Airways',
     'VIR': 'Virgin Atlantic',
@@ -68,6 +71,7 @@ const airlines = {
     'AZA': 'ITA Airways',
     'TAP': 'Air Portugal',
     'BEL': 'Brussels Airlines',
+    'MSR': 'EgyptAir',
     'CLH': 'Lufthansa Cargo',
     'CLX': 'Cargolux',
     'QTR': 'Qatar Airways',
@@ -142,7 +146,9 @@ const airlines = {
     // Private Aviation & Charter Operators
     'EJA': 'NetJets',
     'EJM': 'NetJets Management',
+    'NJE': 'NetJets Europe',
     'LXJ': 'Flexjet',
+    'LJY': 'L.J. Aviation',
     'VJT': 'VistaJet',
     'VJA': 'Vista America',
     'TIV': 'Thrive',
@@ -189,7 +195,12 @@ const airlines = {
     'JTZ': 'Nicholas Air',
     'GMH': 'Hughes Flying Service',
     'STY': 'Altius Aviation',
-    'GXA': 'GlobalX Air'
+    'GXA': 'GlobalX Air',
+    'CYO': 'ATI Jet',
+    'JKR': 'Justice Air Charter',
+    'NJM': 'Northern Jet Management',
+    'WMN': 'Trident Aircraft',
+    'MIL': 'US Military'
 };
 
 function getAirlineName(icao) {
@@ -215,7 +226,10 @@ const logoOverrides = {
     'ELY': 'logos/ELY.jpg',
     
     // Porter Airlines - Custom logo for better visibility
-    'PTR': 'logos/PTR.png'
+    'PTR': 'logos/PTR.png',
+
+    // Military / US Government - flag icon
+    'MIL': 'logos/flag.png'
 };
 
 function getAirlineLogo(icao) {

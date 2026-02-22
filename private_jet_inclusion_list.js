@@ -32,9 +32,7 @@
  */
 
 const PRIVATE_JET_INCLUSION_LIST = [
-    'EJA',  // NetJets Aviation
-    'LXJ',  // Flexjet
-    'VJT'   // Vista America / VistaJet (showed up in logs with route data)
+    // Empty - all private jet operators are excluded when PRIVATE_FLIGHTS=no
 ];
 
 // Export as a Set for efficient lookup

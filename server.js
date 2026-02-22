@@ -542,6 +542,53 @@ const PRIVATE_JET_OPERATORS = require('./private_jet_operators.js');
 // This overrides the exclusion for specific operators you want to track
 const PRIVATE_JET_INCLUSION_LIST = require('./private_jet_inclusion_list.js');
 
+// Military/Government callsign prefixes — sorted longest-first to ensure correct prefix matching
+const MILITARY_CALLSIGN_PREFIXES = [
+    // User-specified prefixes
+    'BLKCAT', 'VCUUM',                                                     // 6 chars
+    'DEATH', 'CROWN', 'LUCKY', 'DRAGN',                                    // 5 chars
+    'DOOM', 'SPAR', 'JAKE', 'IRON', 'BISON', 'DUDE', 'NINJA', 'SLAM',    // 4 chars
+    'VOODOO', 'REACH', 'GHOST', 'BLADE', 'VIPER', 'RAPTOR',               // 4-6 chars (additional known)
+    'VENUS', 'ROCKY', 'HOMER', 'HAVOC', 'GATOR', 'EVAC',                  // 4-5 chars (additional known)
+    'RCH', 'AMC', 'SAM', 'NAT', 'VAR',                                    // 3 chars (user-specified)
+    'VC', 'PD',                                                            // 2 chars (user-specified)
+].sort((a, b) => b.length - a.length);
+
+// Owner name keywords that indicate a military or government-operated N-number aircraft
+const GOVERNMENT_OWNER_KEYWORDS = [
+    'department of the air force', 'department of the navy', 'department of the army',
+    'us air force', 'us army', 'us navy', 'department of defense',
+    'dept of homeland security', 'department of homeland security',
+    'federal bureau of investigation',
+    'drug enforcement administration',
+    'customs and border protection',
+    'transportation security administration',
+    'bureau of alcohol, tobacco',
+    'air force life cycle management', 'air force material command',
+];
+
+function isMilitaryFlight(callsign, ownerName) {
+    if (callsign) {
+        const cs = callsign.toUpperCase().trim();
+        for (const prefix of MILITARY_CALLSIGN_PREFIXES) {
+            if (cs.startsWith(prefix)) {
+                console.log(`[Military] ✈ ${callsign} matched military prefix: ${prefix}`);
+                return true;
+            }
+        }
+    }
+    if (ownerName) {
+        const owner = ownerName.toLowerCase();
+        for (const keyword of GOVERNMENT_OWNER_KEYWORDS) {
+            if (owner.includes(keyword)) {
+                console.log(`[Military] ✈ ${callsign || 'N-number'} matched government owner: ${ownerName}`);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // Commercial Airlines ICAO Codes (for filtering private flights)
 // Based on FAA-authorized airline call signs from 123atc.com
 // Includes passenger airlines and cargo/shipping companies
@@ -1378,7 +1425,7 @@ async function getFlightradar24FlightInfo(callsign, flight) {
 }
 
 async function getAdsbLolFlightDetails(callsign) {
-    const empty = { registration: null, aircraft_type: null };
+    const empty = { registration: null, aircraft_type: null, dbFlags: 0 };
     if (!ADSBLOL_ENABLED || !callsign) return empty;
 
     try {
@@ -1396,9 +1443,10 @@ async function getAdsbLolFlightDetails(callsign) {
         const first = ac[0] || {};
         const registration = first.r || null;
         const callsignType = first.t || null;
+        const dbFlags = first.dbFlags || 0;
 
         if (!registration) {
-            return { registration: null, aircraft_type: callsignType };
+            return { registration: null, aircraft_type: callsignType, dbFlags };
         }
 
         const encodedReg = encodeURIComponent(registration);
@@ -1414,10 +1462,13 @@ async function getAdsbLolFlightDetails(callsign) {
         const regAc = Array.isArray(regResponse.data?.ac) ? regResponse.data.ac : [];
         const regFirst = regAc[0] || {};
         const regType = regFirst.t || null;
+        // Prefer dbFlags from reg response if present (more authoritative), fall back to callsign response
+        const regDbFlags = regFirst.dbFlags || dbFlags;
 
         return {
             registration,
-            aircraft_type: regType || callsignType || null
+            aircraft_type: regType || callsignType || null,
+            dbFlags: regDbFlags
         };
     } catch (error) {
         const status = error.response?.status;
@@ -1438,7 +1489,15 @@ async function getAdsbLolRouteInfo(callsign, flight) {
 
     const flightDetails = await getAdsbLolFlightDetails(callsign);
     const registration = flightDetails.registration || null;
-    const aircraftType = flightDetails.aircraft_type || null;
+    let aircraftType = flightDetails.aircraft_type || null;
+    const dbFlags = flightDetails.dbFlags || 0;
+    const isMilitaryByFlag = (dbFlags & 1) !== 0;
+    const isLADD = (dbFlags & 8) !== 0;
+    const isPIA = (dbFlags & 4) !== 0;
+    if (dbFlags > 0) {
+        const flagLabels = [isMilitaryByFlag && 'MILITARY', isLADD && 'LADD', isPIA && 'PIA'].filter(Boolean).join(', ');
+        console.log(`[adsb.lol] ${callsign} dbFlags=${dbFlags} (${flagLabels})`);
+    }
 
     let route = null;
     let origin = null;
@@ -1486,17 +1545,48 @@ async function getAdsbLolRouteInfo(callsign, flight) {
             // But still extract aircraft type if available
             aircraftType = route.type || aircraftType;
         } else {
-            // Try to extract route from airport_codes or _airports
-            if (typeof route.airport_codes === 'string' && route.airport_codes.includes('-')) {
-                const [orig, dest] = route.airport_codes.split('-');
-                origin = orig || null;
-                destination = dest || null;
+            // Try _airports array first (preferred: has lat/lon for position-based segment detection)
+            if (Array.isArray(route._airports) && route._airports.length >= 2) {
+                if (route._airports.length === 2) {
+                    origin = route._airports[0]?.icao || null;
+                    destination = route._airports[1]?.icao || null;
+                } else {
+                    // Multi-leg route: use aircraft position to find the current active segment
+                    const aircraftLat = flight?.latitude;
+                    const aircraftLon = flight?.longitude;
+                    if (Number.isFinite(aircraftLat) && Number.isFinite(aircraftLon)) {
+                        let minDist = Infinity;
+                        let nearestIdx = 0;
+                        for (let i = 0; i < route._airports.length; i++) {
+                            const apt = route._airports[i];
+                            if (Number.isFinite(apt.lat) && Number.isFinite(apt.lon)) {
+                                const dist = calculateDistance(aircraftLat, aircraftLon, apt.lat, apt.lon);
+                                if (dist < minDist) {
+                                    minDist = dist;
+                                    nearestIdx = i;
+                                }
+                            }
+                        }
+                        // Nearest airport is the likely destination; the one before it is the origin
+                        const segOriginIdx = nearestIdx > 0 ? nearestIdx - 1 : 0;
+                        const segDestIdx = nearestIdx > 0 ? nearestIdx : 1;
+                        origin = route._airports[segOriginIdx]?.icao || null;
+                        destination = route._airports[segDestIdx]?.icao || null;
+                        console.log(`[adsb.lol] Multi-leg route for ${callsign}: nearest airport [${nearestIdx}] ${route._airports[nearestIdx]?.icao}, using segment ${origin} -> ${destination}`);
+                    } else {
+                        origin = route._airports[0]?.icao || null;
+                        destination = route._airports[1]?.icao || null;
+                    }
+                }
             }
 
-            // Also try _airports array
-            if ((!origin || !destination) && Array.isArray(route._airports) && route._airports.length >= 2) {
-                origin = origin || route._airports[0]?.icao || null;
-                destination = destination || route._airports[1]?.icao || null;
+            // Fallback: try airport_codes string if _airports didn't resolve
+            if ((!origin || !destination) && typeof route.airport_codes === 'string' && route.airport_codes.includes('-')) {
+                const airports = route.airport_codes.split('-').filter(Boolean);
+                if (airports.length >= 2) {
+                    origin = airports[0] || null;
+                    destination = airports[1] || null;
+                }
             }
 
             if (route.airline_code && route.airline_code !== 'unknown') {
@@ -1518,7 +1608,10 @@ async function getAdsbLolRouteInfo(callsign, flight) {
         airline_logo_code: airlineCode,
         aircraft_registration: registration,
         departure_time: null,
-        source: 'adsblol'
+        source: 'adsblol',
+        ...(isMilitaryByFlag && { is_military: true }),
+        ...(isLADD && { is_ladd: true }),
+        ...(isPIA && { is_pia: true }),
     };
     console.log(
         `[adsb.lol] Route/type for ${callsign}: ${origin || 'Unknown'} -> ${destination || 'Unknown'} ` +
@@ -2050,12 +2143,21 @@ app.get('/api/route/:icao24', async (req, res) => {
                     routeData.aircraft_type = routeData.aircraft_type || secondaryResult.data.aircraft_type;
                     routeData.aircraft_registration = routeData.aircraft_registration || secondaryResult.data.aircraft_registration;
                 }
+                // Propagate dbFlags-derived tags regardless of route completeness
+                if (secondaryResult.data.is_military) routeData.is_military = true;
+                if (secondaryResult.data.is_ladd) routeData.is_ladd = true;
+                if (secondaryResult.data.is_pia) routeData.is_pia = true;
                 hasCompleteRoute = isRouteComplete(routeData);
             }
         }
 
         // Step 3: If still no complete route, try FlightAware as tertiary (for both commercial AND private)
-        if (!hasCompleteRoute && isFAAvailable()) {
+        // Skip FA entirely for LADD/PIA aircraft — they never return route data by design, saving API credits
+        const isLaddOrPia = routeData?.is_ladd || routeData?.is_pia || secondaryResult?.data?.is_ladd || secondaryResult?.data?.is_pia;
+        if (isLaddOrPia) {
+            console.log(`[Route Request] ⛔ ${callsign} is LADD/PIA - skipping FA tertiary call (route data will never be available)`);
+        }
+        if (!hasCompleteRoute && isFAAvailable() && !isLaddOrPia) {
             console.log(`[Route Request] ${hasCompleteRoute ? 'Incomplete' : 'No'} route data (origin: ${routeData?.origin || 'null'}, dest: ${routeData?.destination || 'null'}), trying FA (tertiary)...`);
             const tertiaryResult = await getFlightAwareFlightInfo(callsign, flightForLookup, true);
             if (tertiaryResult.success) {
@@ -2103,21 +2205,39 @@ app.get('/api/route/:icao24', async (req, res) => {
 
     if (routeData) {
         // For N-number private flights, try to look up owner from registration database
+        let ownerName = null;
         if (callsign && callsign.startsWith('N') && /^N\d/.test(callsign)) {
-            // This is an N-number (starts with N followed by a digit)
             const registration = routeData.aircraft_registration || callsign;
-            const owner = lookupPrivateOwner(registration);
-            
-            if (owner) {
-                console.log(`[Private Registry] Found owner for ${registration}: ${owner}`);
-                routeData.private_owner = owner;
+            ownerName = lookupPrivateOwner(registration);
+            if (ownerName) {
+                console.log(`[Private Registry] Found owner for ${registration}: ${ownerName}`);
+                routeData.private_owner = ownerName;
             } else {
                 console.log(`[Private Registry] No owner found for ${registration}`);
                 routeData.private_owner = null;
             }
         }
-        
+
+        // Tag military/government flights: callsign prefix, government N-number owner, or adsb.lol dbFlags
+        if (routeData.is_military || isMilitaryFlight(callsign, ownerName)) {
+            routeData.is_military = true;
+            routeData.airline = 'US Military';
+            routeData.airline_logo_code = 'MIL';
+        }
+
         return res.json(routeData);
+    }
+
+    // Even with no route data, tag military flights so the UI shows the flag icon
+    if (isMilitaryFlight(callsign, null)) {
+        return res.json({
+            origin: null,
+            destination: null,
+            aircraft_type: null,
+            is_military: true,
+            airline: 'US Military',
+            airline_logo_code: 'MIL'
+        });
     }
 
     // If no data from any source (APIs failed/unavailable, not in cache, or rejected by filters)

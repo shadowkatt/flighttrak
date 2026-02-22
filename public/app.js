@@ -79,6 +79,11 @@ function resolveRouteEndpoints(flight, safeGetAirportName) {
 }
 
 function getDisplayAirlineName(flight, callsign) {
+    // Military/government flights take priority
+    if (flight.is_military) {
+        return 'US Military';
+    }
+
     // For N-number private flights, check if we have owner info from registry
     if (callsign && callsign.startsWith('N') && /^N\d/.test(callsign)) {
         if (flight.private_owner) {
@@ -117,6 +122,11 @@ function getDisplayAirlineName(flight, callsign) {
 
 // NEW: Get operating carrier name for Recent Traffic (shows actual operator, not painted airline)
 function getOperatingCarrierName(flight, callsign) {
+    // Military/government flights take priority
+    if (flight.is_military) {
+        return 'US Military';
+    }
+
     // For N-number private flights, check if we have owner info from registry
     if (callsign && callsign.startsWith('N') && /^N\d/.test(callsign)) {
         if (flight.private_owner) {
@@ -150,7 +160,7 @@ function getAirlineLogo(callsign) {
     }
     
     // Special cases: Use flightaware_logos for better quality on specific airlines
-    const useFlightAwareLogos = ['ASA', 'EJA', 'APZ']; // Alaska Airlines, NetJets, Air Premia
+    const useFlightAwareLogos = ['ASA', 'EJA', 'NJE', 'APZ']; // Alaska Airlines, NetJets, NetJets Europe, Air Premia
     const logoFolder = useFlightAwareLogos.includes(airlineCode) ? 'flightaware_logos' : 'radarbox_logos';
     
     return `https://raw.githubusercontent.com/Jxck-S/airline-logos/main/${logoFolder}/${airlineCode}.png`;
@@ -235,6 +245,15 @@ function processFlights(flights) {
                     }
                     if (route.private_owner) {
                         flight.private_owner = route.private_owner; // Store private aircraft owner
+                    }
+                    if (route.is_military) {
+                        flight.is_military = true;
+                    }
+                    if (route.is_ladd) {
+                        flight.is_ladd = true; // LADD = privacy-opted aircraft, route data typically unavailable
+                    }
+                    if (route.is_pia) {
+                        flight.is_pia = true; // PIA = rotating anonymous ICAO hex
                     }
                     if (route.departure_time) {
                         flight.departure_time = route.departure_time; // Store departure time
@@ -387,14 +406,13 @@ let isProcessingPopup = false; // Track if we're currently showing a popup
 const POPUP_DISPLAY_TIME_MS = 15000; // 15 seconds
 
 function showFlightPopup(flight) {
-    // Skip if already showing this flight
+    // Skip if already showing or queued for this flight
     if (currentPopup && currentPopup.dataset.icao24 === flight.icao24) return;
     if (popupQueue.some(f => f.icao24 === flight.icao24)) return;
 
-    // Add to queue for spaced display
     popupQueue.push(flight);
-    
-    // Process queue if not already running
+    console.log(`[Popup] Queued ${flight.callsign || flight.icao24} (queue length: ${popupQueue.length})`);
+
     if (!isProcessingPopup) {
         processPopupQueue();
     }
@@ -407,13 +425,9 @@ function processPopupQueue() {
         return;
     }
 
-    // Mark as processing
     isProcessingPopup = true;
-
-    // Get next flight from queue
     const flight = popupQueue.shift();
-    
-    // Remove existing popup if present (should not happen with proper queueing)
+
     if (currentPopup) {
         currentPopup.remove();
     }
@@ -457,9 +471,11 @@ function processPopupQueue() {
 
     document.body.appendChild(popup);
     currentPopup = popup;
+    const popupShownAt = Date.now();
+    console.log(`[Popup] Showing ${callsign} — will dismiss in ${POPUP_DISPLAY_TIME_MS / 1000}s (${popupQueue.length} remaining in queue)`);
 
-    // Auto-remove after 15 seconds and process next in queue
     setTimeout(() => {
+        console.log(`[Popup] Dismissing ${callsign} after ${Date.now() - popupShownAt}ms`);
         popup.classList.add('fade-out');
         setTimeout(() => {
             if (popup.parentNode) {
@@ -468,7 +484,6 @@ function processPopupQueue() {
             if (currentPopup === popup) {
                 currentPopup = null;
             }
-            // Process next popup in queue after this one is done
             processPopupQueue();
         }, 400);
     }, POPUP_DISPLAY_TIME_MS);

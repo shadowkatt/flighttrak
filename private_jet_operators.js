@@ -36,7 +36,9 @@ const PRIVATE_JET_OPERATORS = [
     // === Fractional Ownership Programs ===
     'EJA',  // NetJets Aviation (world's largest private jet operator)
     'EJM',  // NetJets Management
+    'NJE',  // NetJets Europe
     'LXJ',  // Flexjet
+    'LJY',  // L.J. Aviation
     'VJT',  // VistaJet
     'VJA',  // Vista America
     'JRE',  // Jet Share
